@@ -1,0 +1,11 @@
+# Ignora i file di cache Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignora i file generati automaticamente
+build/
+install/
+log/
+sys
+GPIO
