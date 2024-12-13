@@ -9,3 +9,6 @@ install/
 log/
 sys
 GPIO
+
+src/sentinel_base/sentinel_base/external_modules/RPi/_GPIO.cpython-*.so
+
