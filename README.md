@@ -23,3 +23,8 @@ ros2 node list
 ROS topic list:
 ros2 topic list 
 
+From Server Raspberry:
+mosquitto_sub -h 192.168.0.133 -p 8883 -t "test/topic" --cafile ca.crt --cert client.crt --key client.key
+
+From Client PC:
+mosquitto_pub --cafile ca.crt --cert client.crt --key client.key -h 192.168.0.133 -p 8883 -t "test/topic" -m "Hello from PC!"
