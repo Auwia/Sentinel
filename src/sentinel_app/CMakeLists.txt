@@ -1,9 +1,20 @@
-find_package(rosidl_default_generators REQUIRED)
+cmake_minimum_required(VERSION 3.8)
+project(sentinel_app)
 
-rosidl_generate_interfaces(${PROJECT_NAME}
-  "action/PickObject.action"
-  DEPENDENCIES builtin_interfaces
+find_package(ament_cmake REQUIRED)
+find_package(rclpy REQUIRED)
+
+install(
+  PROGRAMS
+    motor_action_server.py
+    motor_action_client.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
-ament_export_dependencies(rosidl_default_runtime)
+install(
+  DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}/
+)
+
+ament_package()
 

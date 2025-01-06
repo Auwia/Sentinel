@@ -19,7 +19,6 @@ setup(
     maintainer_email='massimo.manganiello@gmail.com',
     description='Hardware control for Sentinel project',
     license='Apache License 2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'servo_controller = sentinel_base.servo_controller:main',

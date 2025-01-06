@@ -1,0 +1,15 @@
+# MoveMotors.action
+
+# Goal
+int32 motor_0
+int32 motor_1
+int32 motor_2
+---
+# Result
+bool success
+---
+# Feedback
+float32 motor_0_progress
+float32 motor_1_progress
+float32 motor_2_progress
+

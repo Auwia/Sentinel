@@ -1,0 +1,17 @@
+# Goal (richiesta)
+int32 motor_id
+float32 target_speed
+float32 target_angle
+
+---
+
+# Result (risultato)
+bool success
+string status_message
+
+---
+
+# Feedback (opzionale)
+float32 current_speed
+float32 current_angle
+

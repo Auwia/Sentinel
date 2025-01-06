@@ -1,11 +1,12 @@
-from setuptools import setup, find_packages
+from setuptools import setup
 
 package_name = 'sentinel_app'
 
 setup(
     name=package_name,
     version='0.1.0',
-    packages=find_packages(include=['sentinel_app', 'sentinel_app.*']),
+    packages=[package_name],
+    package_dir={'': 'sentinel_app'},  # Indica la directory contenente i file Python
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
@@ -13,9 +14,9 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='maintainer_name',
-    maintainer_email='maintainer_email@example.com',
-    description='A brief description of the sentinel_app package',
+    maintainer='auwia',
+    maintainer_email='massimo.manganiello@gmail.com',
+    description='Application logic for Sentinel project',
     license='Apache License 2.0',
     entry_points={
         'console_scripts': [
