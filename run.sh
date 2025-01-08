@@ -1,5 +1,5 @@
 #!/bin/bash
-source ~/Sentinel/install/setup.bash
+source /home/auwia/Desktop/projects/Sentinel/install/setup.bash
 exec "$@"
 
 rm -rf build/ install/ log/
