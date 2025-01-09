@@ -2,8 +2,6 @@
 
 Developed with ROS 2 - Jazzy Jalisco - https://docs.ros.org/en/jazzy/Installation.html
 
-You will need to run this command on every new shell you open to have access to the ROS 2 commands, like so:
-
 git clone git@github.com:Auwia/Sentinel.git
 
 cd Sentinel
