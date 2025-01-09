@@ -1,27 +1,22 @@
 # Sentinel
 
-ROS 2 - Jazzy Jalisco - https://docs.ros.org/en/jazzy/Installation.html
+Developed with ROS 2 - Jazzy Jalisco - https://docs.ros.org/en/jazzy/Installation.html
 
 You will need to run this command on every new shell you open to have access to the ROS 2 commands, like so:
 
-source /opt/ros/jazzy/setup.bash
+git clone git@github.com:Auwia/Sentinel.git
 
-start turtlesim
-export LIBGL_ALWAYS_SOFTWARE=1
-ros2 run turtlesim turtlesim_node
+cd Sentinel
 
-Use turtlesim
-ros2 run turtlesim turtle_teleop_key
+colcon build
 
-RQT
-rqt or rqt --force-discover // in case of issue
-rqt_graph
+source install/setup.bash
 
-ROS node list:
-ros2 node list
+Server:
+ros2 launch robot_controller robot_control_launch.py
 
-ROS topic list:
-ros2 topic list 
+Client:
+ros2 action send_goal /servo_relay_control/set_servo_angle custom_interfaces/action/MoveMotors "{motor_id: 0, target_speed: 10.0, target_angle: 190.0, servo_type: 360}"
 
 From Server Raspberry:
 mosquitto_sub -h 192.168.0.133 -p 8883 -t "test/topic" --cafile ca.crt --cert client.crt --key client.key

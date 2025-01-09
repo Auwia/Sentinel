@@ -2,6 +2,7 @@
 int32 motor_id
 float32 target_speed
 float32 target_angle
+int32 servo_type
 
 ---
 
