@@ -1,0 +1,5 @@
+bool turn_on  # True to turn ON, False to turn OFF
+---
+bool success
+string message
+

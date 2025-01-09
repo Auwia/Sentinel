@@ -1,7 +1,10 @@
 import time
 from rclpy.node import Node
-from custom_interfaces.action import MoveMotors
 from rclpy.action import ActionServer
+
+from custom_interfaces.action import MoveMotors
+from custom_interfaces.srv import PumpControl
+from custom_interfaces.srv import ValveControl
 
 try:
     from adafruit_pca9685 import PCA9685
@@ -28,10 +31,24 @@ except ImportError:
 
     busio = MockI2C
 
-
 class ServoRelayController(Node):
     def __init__(self):
         super().__init__('servo_relay_control')
+
+        # RELAY initialization
+        self.pump_service = self.create_service(
+            PumpControl,
+            'pump_control',
+            self.handle_pump_control_request
+        )
+
+        self.valve_service = self.create_service(
+            ValveControl,
+            'valve_control',
+            self.handle_valve_control_request
+        )
+
+        # PCA9685 initialization
         self.i2c = busio.I2C(SCL, SDA) if SCL and SDA else busio()
         self.pca = PCA9685(self.i2c, address=0x40)
         self.pca.frequency = 50
@@ -85,6 +102,41 @@ class ServoRelayController(Node):
         self.pca.deinit()
         self.get_logger().info("Controller PCA9685 pulito e risorse rilasciate.")
 
+    def handle_pump_control_request(self, request, response):
+        if hasattr(self, 'pump_pin'):  # Verifica se il controllo GPIO è disponibile
+            import RPi.GPIO as GPIO
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(self.pump_pin, GPIO.OUT)
+    
+            if request.turn_on:
+                GPIO.output(self.pump_pin, GPIO.HIGH)
+                response.success = True
+                response.message = "Pump turned ON successfully."
+            else:
+                GPIO.output(self.pump_pin, GPIO.LOW)
+                response.success = True
+                response.message = "Pump turned OFF successfully."
+    
+            self.get_logger().info(response.message)
+        else:
+            # Mock per ambiente non Raspberry Pi
+            state = "ON" if request.turn_on else "OFF"
+            response.success = True
+            response.message = f"Pump (mock) turned {state}."
+            self.get_logger().info(response.message)
+    
+        return response
+
+    def handle_valve_control_request(self, request, response):
+        if request.turn_on:
+            self.get_logger().info("Turning ON the valve.")
+            response.success = True
+            response.message = "Valve turned ON successfully."
+        else:
+            self.get_logger().info("Turning OFF the valve.")
+            response.success = True
+            response.message = "Valve turned OFF successfully."
+        return response
 
 def main(args=None):
     import rclpy

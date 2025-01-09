@@ -1,9 +1,11 @@
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool
+import sys
 
-# Import RPi.GPIO or use a mock if unavailable
 try:
+    if sys.platform != "linux" or not hasattr(sys, "real_prefix"):
+        raise ImportError("Not running on Raspberry Pi")
     import RPi.GPIO as GPIO
 except ImportError:
     class MockGPIO:
