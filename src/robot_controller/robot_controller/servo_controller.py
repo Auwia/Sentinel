@@ -157,12 +157,12 @@ class ServoRelayController(Node):
                 self.get_logger().info(response.message)
             else:
                 GPIO.setmode(GPIO.BCM)
-                GPIO.setup(18, GPIO.OUT)
+                GPIO.setup(27, GPIO.OUT)
                 if request.turn_on:
-                    GPIO.output(18, GPIO.HIGH)
+                    GPIO.output(27, GPIO.HIGH)
                     response.message = "Pump turned ON successfully."
                 else:
-                    GPIO.output(18, GPIO.LOW)
+                    GPIO.output(27, GPIO.LOW)
                     response.message = "Pump turned OFF successfully."
                 response.success = True
                 self.get_logger().info(response.message)
@@ -173,16 +173,25 @@ class ServoRelayController(Node):
         return response
 
     def handle_valve_control_request(self, request, response):
-        if request.turn_on:
-            self.get_logger().info("Turning ON the valve.")
-            response.success = True
-            response.message = "Valve turned ON successfully."
-        else:
-            self.get_logger().info("Turning OFF the valve.")
-            response.success = True
-            response.message = "Valve turned OFF successfully."
+        try:
+            self.get_logger().info(f"Ricevuta richiesta: turn_on={request.turn_on}")
+            if request.turn_on:
+                GPIO.output(17, GPIO.LOW)  # LOW per accendere
+                state = GPIO.input(17)
+                self.get_logger().info(f"Stato attuale del pin 17: {state} (LOW expected).")
+                response.success = True
+                response.message = "Valve turned ON successfully."
+            else:
+                GPIO.output(17, GPIO.HIGH)  # HIGH per spegnere
+                state = GPIO.input(17)
+                self.get_logger().info(f"Stato attuale del pin 17: {state} (HIGH expected).")
+                response.success = True
+                response.message = "Valve turned OFF successfully."
+        except Exception as e:
+            response.success = False
+            response.message = f"Errore durante il controllo della valvola: {str(e)}"
+            self.get_logger().error(response.message)
         return response
-
 
 def main(args=None):
     import rclpy
