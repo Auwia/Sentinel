@@ -18,7 +18,6 @@ setup(
     maintainer_email='massimo.manganiello@gmail.com',
     description='Robot Controller Package',
     license='Apache 2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'servo_relay_control = robot_controller.servo_controller:main',

@@ -16,7 +16,7 @@ except ImportError:
         def cleanup(self): pass
     GPIO = MockGPIO()
 
-VALVE_PIN = 23  # GPIO pin for valve relay
+VALVE_PIN = 17  # GPIO pin for valve relay
 
 class ValveControl(Node):
     def __init__(self):

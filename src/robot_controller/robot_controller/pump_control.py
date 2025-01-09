@@ -1,12 +1,12 @@
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool
-import sys
+import os
 
+# Import RPi.GPIO o usa MockGPIO se non disponibile
 try:
-    if sys.platform != "linux" or not hasattr(sys, "real_prefix"):
-        raise ImportError("Not running on Raspberry Pi")
     import RPi.GPIO as GPIO
+    print("RPi.GPIO correttamente caricato.")
 except ImportError:
     class MockGPIO:
         BCM = OUT = HIGH = LOW = None
@@ -15,8 +15,9 @@ except ImportError:
         def output(self, *args): pass
         def cleanup(self): pass
     GPIO = MockGPIO()
+    print("Warning: Utilizzando MockGPIO (nessun controllo reale).")
 
-PUMP_PIN = 18  # GPIO pin for pump relay
+PUMP_PIN = 27  # GPIO pin per il relay della pompa
 
 class PumpControl(Node):
     def __init__(self):
@@ -24,12 +25,12 @@ class PumpControl(Node):
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(PUMP_PIN, GPIO.OUT)
         self.create_subscription(Bool, '/pump', self.pump_callback, 10)
-        self.get_logger().info('Pump Control Node Started')
+        self.get_logger().info('Pump Control Node avviato.')
 
     def pump_callback(self, msg):
         GPIO.output(PUMP_PIN, GPIO.HIGH if msg.data else GPIO.LOW)
         state = "ON" if msg.data else "OFF"
-        self.get_logger().info(f"Pump is now {state}")
+        self.get_logger().info(f"La pompa è ora {state}.")
 
 def main(args=None):
     rclpy.init(args=args)
@@ -38,4 +39,6 @@ def main(args=None):
         rclpy.spin(node)
     finally:
         GPIO.cleanup()
+        node.destroy_node()
         rclpy.shutdown()
+
