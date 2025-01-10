@@ -18,7 +18,7 @@ ros2 launch robot_controller robot_control_launch.py
 
 Client:
 engine moves:
-ros2 action send_goal /servo_relay_control/set_servo_angle custom_interfaces/action/MoveMotors "{motor_id: 0, target_speed: 10.0, target_angle: 190.0, servo_type: 360}"
+ros2 action send_goal /servo_control/set_servo_angle custom_interfaces/action/MoveMotors "{motor_id: 0, target_angle: 45.0, target_speed: 5.0, servo_type: 180}"
 
 pump on:
 ros2 service call /pump_control custom_interfaces/srv/PumpControl "{turn_on: true}"

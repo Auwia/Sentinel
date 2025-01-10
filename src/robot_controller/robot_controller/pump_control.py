@@ -2,43 +2,51 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool
 import os
+from .gpio_utils import load_gpio
+from custom_interfaces.srv import PumpControl
 
-# Import RPi.GPIO o usa MockGPIO se non disponibile
-try:
-    import RPi.GPIO as GPIO
-    print("RPi.GPIO correttamente caricato.")
-except ImportError:
-    class MockGPIO:
-        BCM = OUT = HIGH = LOW = None
-        def setmode(self, *args): pass
-        def setup(self, *args): pass
-        def output(self, *args): pass
-        def cleanup(self): pass
-    GPIO = MockGPIO()
-    print("Warning: Utilizzando MockGPIO (nessun controllo reale).")
+GPIO = load_gpio()
 
-PUMP_PIN = 27  # GPIO pin per il relay della pompa
+PUMP_PIN = 27  # GPIO pin for pump relay
 
-class PumpControl(Node):
+class PumpControlNode(Node):
     def __init__(self):
         super().__init__('pump_control')
         GPIO.setmode(GPIO.BCM)
-        GPIO.setup(PUMP_PIN, GPIO.OUT)
-        self.create_subscription(Bool, '/pump', self.pump_callback, 10)
+        GPIO.setup(PUMP_PIN, GPIO.OUT, initial=GPIO.HIGH)								   
+
+        # Creazione del servizio
+        self.create_service(
+            PumpControl,  # Tipo del servizio
+            '/pump_control',  # Nome del servizio
+            self.handle_pump_control_request  # Callback
+        )
+
         self.get_logger().info('Pump Control Node avviato.')
 
-    def pump_callback(self, msg):
-        GPIO.output(PUMP_PIN, GPIO.HIGH if msg.data else GPIO.LOW)
-        state = "ON" if msg.data else "OFF"
-        self.get_logger().info(f"La pompa è ora {state}.")
+    def handle_pump_control_request(self, request, response):
+        try:
+            if request.turn_on:
+                GPIO.output(PUMP_PIN, GPIO.HIGH)
+                response.message = "Pompa accesa con successo."
+            else:
+                GPIO.output(PUMP_PIN, GPIO.LOW)
+                response.message = "Pompa spenta con successo."
+            response.success = True
+        except Exception as e:
+            response.success = False
+            response.message = f"Errore durante il controllo della pompa: {str(e)}"
+        self.get_logger().info(response.message)
+        return response
 
 def main(args=None):
     rclpy.init(args=args)
-    node = PumpControl()
+    node = PumpControlNode()
     try:
         rclpy.spin(node)
     finally:
         GPIO.cleanup()
         node.destroy_node()
         rclpy.shutdown()
+
 

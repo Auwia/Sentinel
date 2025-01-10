@@ -14,8 +14,8 @@ def generate_launch_description():
     return LaunchDescription([
         Node(
             package='robot_controller',
-            executable='servo_relay_control',
-            name='servo_relay_control',
+            executable='servo_control',
+            name='servo_control',
             output='screen',
             parameters=[params_file], 
         ),
@@ -32,5 +32,17 @@ def generate_launch_description():
             name='calibration_gui',
             output='screen',
             parameters=[params_file]
+        ),
+        Node(
+            package='robot_controller',
+            executable='pump_control',
+            name='pump_control',
+            output='screen',
+        ),
+        Node(
+            package='robot_controller',
+            executable='valve_control',
+            name='valve_control',
+            output='screen',
         )
     ])
