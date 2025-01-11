@@ -27,10 +27,10 @@ class PumpControlNode(Node):
     def handle_pump_control_request(self, request, response):
         try:
             if request.turn_on:
-                GPIO.output(PUMP_PIN, GPIO.HIGH)
+                GPIO.output(PUMP_PIN, GPIO.LOW)
                 response.message = "Pompa accesa con successo."
             else:
-                GPIO.output(PUMP_PIN, GPIO.LOW)
+                GPIO.output(PUMP_PIN, GPIO.HIGH)
                 response.message = "Pompa spenta con successo."
             response.success = True
         except Exception as e:

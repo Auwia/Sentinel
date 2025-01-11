@@ -27,10 +27,10 @@ class ValveControlNode(Node):
     def handle_valve_control_request(self, request, response):
         try:
             if request.turn_on:
-                GPIO.output(VALVE_PIN, GPIO.HIGH)
+                GPIO.output(VALVE_PIN, GPIO.LOW)
                 response.message = "Valvola accesa con successo."
             else:
-                GPIO.output(VALVE_PIN, GPIO.LOW)
+                GPIO.output(VALVE_PIN, GPIO.HIGH)
                 response.message = "Valvola spenta con successo."
             response.success = True
         except Exception as e:
