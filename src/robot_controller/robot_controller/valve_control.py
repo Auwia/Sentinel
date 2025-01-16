@@ -5,6 +5,9 @@ import os
 from .gpio_utils import load_gpio
 from custom_interfaces.srv import ValveControl
 
+import sys
+print(f"Python utilizzato: {sys.executable}")
+
 GPIO = load_gpio()
 
 VALVE_PIN = 17  # GPIO pin for valve relay

@@ -5,6 +5,9 @@ import os
 from .gpio_utils import load_gpio
 from custom_interfaces.srv import PumpControl
 
+import sys
+print(f"Python utilizzato: {sys.executable}")
+
 GPIO = load_gpio()
 
 PUMP_PIN = 27  # GPIO pin for pump relay

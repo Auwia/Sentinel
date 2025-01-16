@@ -4,6 +4,9 @@ from rclpy.action import ActionServer
 
 from custom_interfaces.action import MoveMotors
 
+import sys
+print(f"Python utilizzato: {sys.executable}")
+
 try:
     from adafruit_pca9685 import PCA9685
     from board import SCL, SDA
