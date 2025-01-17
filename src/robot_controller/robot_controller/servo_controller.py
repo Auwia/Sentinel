@@ -64,8 +64,10 @@ class ServoController(Node):
         try:
             self.set_servo_angle(motor_id, target_angle, target_speed, servo_type)
             goal_handle.succeed()
+            self.get_logger().info(f"Invio risultato per motore {motor_id}: success=True, status_message='Comando eseguito con successo!'")
             return MoveMotors.Result(success=True, status_message="Comando eseguito con successo!")
         except Exception as e:
+            self.get_logger().error(f"Errore durante il movimento del servo {motor_id}: {str(e)}")
             goal_handle.abort()
             return MoveMotors.Result(success=False, status_message=f"Errore: {str(e)}")
 
@@ -73,50 +75,53 @@ class ServoController(Node):
         if not (0 <= channel < 16):
             self.get_logger().error(f"Canale {channel} non valido. Deve essere tra 0 e 15.")
             return
-
+    
+        if servo_type not in [180, 270, 360]:
+            self.get_logger().error(f"Tipo di servo {servo_type} non valido. Deve essere 180, 270 o 360.")
+            return
+    
         if servo_type in [180, 270] and not (0 <= target_angle <= servo_type):
             self.get_logger().error(f"Angolo {target_angle} non valido. Deve essere tra 0 e {servo_type}.")
             return
-
+    
+        if speed <= 0:
+            self.get_logger().error(f"Velocità non valida ({speed}): deve essere maggiore di 0.")
+            return
+    
         min_duty = 0x0666
         max_duty = 0x2CCC
-        neutral_duty = (min_duty + max_duty) // 2
-
+    
         if servo_type == 360:
             # Controllo velocità per servomotori a 360°
-            if not (-100 <= speed <= 100):
-                self.get_logger().error(f"Velocità {speed} non valida. Deve essere tra -100 e 100.")
-                return
-
-            if speed > 0:
-                duty_cycle = neutral_duty + int((speed / 100.0) * (max_duty - neutral_duty))
-            elif speed < 0:
-                duty_cycle = neutral_duty + int((speed / 100.0) * (neutral_duty - min_duty))
-            else:
-                duty_cycle = neutral_duty
-
+            neutral_duty = (min_duty + max_duty) // 2
+            duty_cycle = neutral_duty + int((speed / 100.0) * (max_duty - neutral_duty))
             self.pca.channels[channel].duty_cycle = duty_cycle
             self.get_logger().info(f"Servo 360° (Canale {channel}): Velocità: {speed}, Duty cycle: {hex(duty_cycle)}")
         else:
             # Movimento graduale per servomotori standard
             current_angle = self.servo_positions.get(str(channel), 0)
             step = 1 if target_angle > current_angle else -1
-
+    
             if current_angle == target_angle:
                 self.get_logger().info(f"Servo {channel} è già all'angolo {target_angle}°.")
                 return
-
-            for angle in range(int(current_angle), int(target_angle) + step, step):
-                duty_cycle = int(min_duty + (angle / servo_type) * (max_duty - min_duty))
-                self.pca.channels[channel].duty_cycle = duty_cycle
-                self.servo_positions[str(channel)] = angle
-                time.sleep(1 / speed if speed > 0 else 0)
-
+    
+            self.get_logger().info(f"Iniziando movimento del servo {channel} da {current_angle}° a {target_angle}° a velocità {speed}°/s.")
+            try:
+                for angle in range(int(current_angle), int(target_angle) + step, step):
+                    duty_cycle = int(min_duty + (angle / servo_type) * (max_duty - min_duty))
+                    self.pca.channels[channel].duty_cycle = duty_cycle
+                    self.servo_positions[str(channel)] = angle
+                    time.sleep(1 / speed)
+            except Exception as e:
+                self.get_logger().error(f"Errore durante il movimento del servo {channel}: {e}")
+                return
+    
             # Assicura che raggiunga esattamente l'angolo target
             duty_cycle = int(min_duty + (target_angle / servo_type) * (max_duty - min_duty))
             self.pca.channels[channel].duty_cycle = duty_cycle
             self.servo_positions[str(channel)] = target_angle
-
+    
             self.get_logger().info(f"Servo {channel} raggiunto angolo {target_angle}°")
 
     def cleanup(self):
