@@ -6,6 +6,10 @@ from custom_interfaces.action import MoveMotors
 import tkinter as tk
 from tkinter import ttk
 from threading import Thread
+import json
+import os
+
+POSITIONS_FILE = "servo_positions.json"
 
 class CalibrationGUI(Node):
     def __init__(self):
@@ -16,6 +20,9 @@ class CalibrationGUI(Node):
         self.motor_client = ActionClient(self, MoveMotors, '/servo_control/set_servo_angle')
         self.pump_client = self.create_client(PumpControl, '/pump_control')
         self.valve_client = self.create_client(ValveControl, '/valve_control')
+
+        # Flag di emergenza
+        self.emergency_flag = False
 
         # Tkinter GUI setup
         self.root = tk.Tk()
@@ -135,12 +142,16 @@ class CalibrationGUI(Node):
             success = self.send_motor_goal(motor_id, angle, speed)
             if success:
                 self.log(f"Motore {motor_id} impostato su angolo {angle} con velocità {speed}")
+                self.save_motor_position(motor_id, angle)  # Salva la posizione
             else:
                 self.log(f"Errore durante l'impostazione del motore {motor_id}")
         except Exception as e:
             self.log(f"Errore durante l'invio del comando al motore {motor_id}: {e}")
 
     def send_motor_goal(self, motor_id, target_angle, target_speed, servo_type=180):
+        if self.emergency_flag:
+            return False  # Interrompi se emergenza attiva
+
         target_angle = float(target_angle)
         target_speed = float(target_speed)
         servo_type = int(servo_type)
@@ -232,20 +243,22 @@ class CalibrationGUI(Node):
 
     def emergency_stop(self):
         self.log("EMERGENZA ATTIVATA: Arresto di tutti i movimenti.")
+        self.emergency_flag = True  # Attiva la flag di emergenza
+
+        # Arresta i motori
         for motor_id in range(3):
             try:
-                angle = round(float(self.motor_sliders[motor_id].get()))
-                self.send_motor_goal(motor_id, angle, 0)  # Velocità a 0 per fermare il motore
+                self.save_motor_position(motor_id, self.motor_sliders[motor_id].get())  # Salva la posizione attuale
             except Exception as e:
                 self.log(f"Errore durante l'arresto del motore {motor_id}: {e}")
-        
+
         # Arresta la pompa
         try:
             self.set_pump_state(False)
             self.update_pump_button(False)
         except Exception as e:
             self.log(f"Errore durante lo spegnimento della pompa: {e}")
-        
+
         # Arresta la valvola
         try:
             self.set_valve_state(False)
@@ -254,17 +267,33 @@ class CalibrationGUI(Node):
             self.log(f"Errore durante la chiusura della valvola: {e}")
 
         self.log("Emergenza completata.")
+        self.emergency_flag = False  # Reset della flag
 
     def load_motor_positions(self):
+        if os.path.exists(POSITIONS_FILE):
+            with open(POSITIONS_FILE, "r") as file:
+                positions = json.load(file)
+        else:
+            positions = {str(i): 90 for i in range(3)}
+
         for motor_id in range(3):
-            initial_angle = 90  # Recuperare il valore reale se disponibile
-            initial_speed = 10  # Recuperare il valore reale se disponibile
+            angle = positions.get(str(motor_id), 90)
+            self.motor_sliders[motor_id].set(angle)
+            self.update_motor_label(motor_id, angle)
+            self.speed_sliders[motor_id].set(10)
+            self.update_speed_label(motor_id, 10)
 
-            self.motor_sliders[motor_id].set(initial_angle)
-            self.update_motor_label(motor_id, initial_angle)
+    def save_motor_position(self, motor_id, angle):
+        if os.path.exists(POSITIONS_FILE):
+            with open(POSITIONS_FILE, "r") as file:
+                positions = json.load(file)
+        else:
+            positions = {}
 
-            self.speed_sliders[motor_id].set(initial_speed)
-            self.update_speed_label(motor_id, initial_speed)
+        positions[str(motor_id)] = round(float(angle))
+
+        with open(POSITIONS_FILE, "w") as file:
+            json.dump(positions, file)
 
     def log(self, message):
         self.log_text.insert(tk.END, f"{message}\n")
