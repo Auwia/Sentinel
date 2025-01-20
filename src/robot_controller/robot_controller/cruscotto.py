@@ -200,8 +200,8 @@ class Cruscotto(Node):
 
             # Posizioni finali
             self.send_motor_request(0, 90, 10)
-            self.send_motor_request(1, 25, 10)
-            self.send_motor_request(2, 91, 10)
+            self.send_motor_request(1, 20, 10)
+            self.send_motor_request(2, 90, 10)
 
             self.log("Sequenza 'prendi' completata.")
         except Exception as e:
