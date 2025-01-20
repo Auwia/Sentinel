@@ -21,10 +21,12 @@ setup(
     entry_points={
         'console_scripts': [
             'servo_control = robot_controller.servo_controller:main',
+            'servo_control_service = robot_controller.servo_control_service:main',
             'camera_processor = robot_controller.camera_processor:main',
             'calibration_gui = robot_controller.calibration_gui:main',
             'pump_control = robot_controller.pump_control:main',
             'valve_control = robot_controller.valve_control:main',
+            'cruscotto = robot_controller.cruscotto:main',
         ],
     },
 )

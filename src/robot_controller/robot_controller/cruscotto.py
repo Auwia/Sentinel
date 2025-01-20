@@ -1,8 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from custom_interfaces.srv import PumpControl, ValveControl
-from rclpy.action import ActionClient
-from custom_interfaces.action import MoveMotors
+from custom_interfaces.srv import SetServoAngle, PumpControl, ValveControl
 import tkinter as tk
 from tkinter import ttk
 from threading import Thread
@@ -11,13 +9,13 @@ import os
 
 POSITIONS_FILE = "src/robot_controller/robot_controller/share/servo_positions.json"
 
-class CalibrationGUI(Node):
+class Cruscotto(Node):
     def __init__(self):
-        super().__init__('calibration_gui')
-        self.get_logger().info("CalibrationGUI avviato.")
+        super().__init__('cruscotto')
+        self.get_logger().info("Cruscotto avviato.")
 
-        # ROS 2 Clients
-        self.motor_client = ActionClient(self, MoveMotors, '/servo_control/set_servo_angle')
+        # ROS 2 Service Clients
+        self.servo_service_client = self.create_client(SetServoAngle, '/servo_control_service')
         self.pump_client = self.create_client(PumpControl, '/pump_control')
         self.valve_client = self.create_client(ValveControl, '/valve_control')
 
@@ -26,7 +24,7 @@ class CalibrationGUI(Node):
 
         # Tkinter GUI setup
         self.root = tk.Tk()
-        self.root.title("Calibration GUI - Action")
+        self.root.title("Cruscotto GUI - Service")
 
         # GUI Elements
         self.create_gui_elements()
@@ -120,6 +118,18 @@ class CalibrationGUI(Node):
         )
         emergency_btn.grid(row=1, column=0, columnspan=2, pady=10)
 
+        # Pulsante Prendi
+        prendi_btn = tk.Button(
+            controls_frame,
+            text="Prendi",
+            bg="blue",
+            fg="white",
+            width=20,
+            height=2,
+            command=lambda: Thread(target=self.execute_prendi).start()
+        )
+        prendi_btn.grid(row=2, column=0, columnspan=2, pady=10)
+
         # Console log
         log_frame = ttk.LabelFrame(self.root, text="Console")
         log_frame.grid(row=2, column=0, padx=10, pady=10)
@@ -139,7 +149,7 @@ class CalibrationGUI(Node):
         try:
             angle = round(float(self.motor_sliders[motor_id].get()))
             speed = round(float(self.speed_sliders[motor_id].get()))
-            success = self.send_motor_goal(motor_id, angle, speed)
+            success = self.send_motor_request(motor_id, angle, speed)
             if success:
                 self.log(f"Motore {motor_id} impostato su angolo {angle} con velocità {speed}")
                 self.save_motor_position(motor_id, angle)  # Salva la posizione
@@ -148,123 +158,148 @@ class CalibrationGUI(Node):
         except Exception as e:
             self.log(f"Errore durante l'invio del comando al motore {motor_id}: {e}")
 
-    def send_motor_goal(self, motor_id, target_angle, target_speed, servo_type=180):
+    def send_motor_request(self, motor_id, target_angle, target_speed, servo_type=180):
         if self.emergency_flag:
             return False  # Interrompi se emergenza attiva
 
-        goal_msg = MoveMotors.Goal()
-        goal_msg.motor_id = motor_id
-        goal_msg.target_angle = float(target_angle)
-        goal_msg.target_speed = float(target_speed)
-        goal_msg.servo_type = int(servo_type)
+        # Preparazione della richiesta per il servizio
+        req = SetServoAngle.Request()
+        req.motor_id = motor_id
+        req.target_angle = float(target_angle)
+        req.target_speed = float(target_speed)
+        req.servo_type = int(servo_type)
 
-        self.motor_client.wait_for_server()
-        goal_future = self.motor_client.send_goal_async(goal_msg)
-        rclpy.spin_until_future_complete(self, goal_future)
-        goal_handle = goal_future.result()
-
-        if not goal_handle.accepted:
-            self.log(f"Comando al motore {motor_id} rifiutato.")
+        if not self.servo_service_client.wait_for_service(timeout_sec=10.0):
+            self.log("Servizio '/servo_control_service' non disponibile.")
             return False
 
-        result_future = goal_handle.get_result_async()
-        rclpy.spin_until_future_complete(self, result_future)
-        result = result_future.result().result
-
-        if result.success:
-            return True
-        else:
-            self.log(f"Errore motore {motor_id}: {result.status_message}")
-            return False
-
-    def toggle_pump(self):
-        current_state = self.pump_btn["bg"] == "green"
-        new_state = not current_state
-        success = self.set_pump_state(new_state)
-        if success:
-            self.update_pump_button(new_state)
-
-    def set_pump_state(self, state):
-        req = PumpControl.Request()
-        req.turn_on = state
-
-        if not self.pump_client.wait_for_service(timeout_sec=10.0):
-            self.log("Servizio 'pump_control' non disponibile.")
-            return False
-
-        future = self.pump_client.call_async(req)
+        future = self.servo_service_client.call_async(req)
         rclpy.spin_until_future_complete(self, future)
         result = future.result()
 
         if result and result.success:
-            self.log(f"Pompa {'ON' if state else 'OFF'}: {result.message}")
             return True
         else:
-            self.log(f"Errore pompa: {result.message if result else 'Nessuna risposta'}")
+            self.log(f"Errore motore {motor_id}: {result.status_message if result else 'Nessuna risposta'}")
             return False
 
+    def execute_prendi(self):
+        """
+        Invoca la sequenza 'prendi' sul server dei motori.
+        """
+        self.log("Esecuzione della sequenza 'prendi' iniziata...")
+        try:
+            self.send_motor_request(0, 90, 10)  # Motore 0: posizione iniziale
+            self.send_motor_request(1, 45, 10)  # Motore 1: posizione iniziale
+            self.send_motor_request(2, 10, 10)  # Motore 2: posizione iniziale
+
+            # Movimento intermedio
+            for angle_1, angle_2 in zip(range(45, 35, -1), range(0, 70, +1)):
+                self.send_motor_request(1, angle_1, 10)
+                self.send_motor_request(2, angle_2, 10)
+
+            # Posizioni finali
+            self.send_motor_request(0, 90, 10)
+            self.send_motor_request(1, 25, 10)
+            self.send_motor_request(2, 91, 10)
+
+            self.log("Sequenza 'prendi' completata.")
+        except Exception as e:
+            self.log(f"Errore durante l'esecuzione di 'prendi': {e}")
+
+    def toggle_pump(self):
+        # Determina lo stato attuale del pulsante (ON o OFF)
+        current_state = self.pump_btn["bg"] == "green"
+        new_state = not current_state  # Inverte lo stato
+    
+        # Prepara la richiesta per il servizio PumpControl
+        req = PumpControl.Request()
+        req.turn_on = new_state
+    
+        # Controlla se il servizio è disponibile
+        if not self.pump_client.wait_for_service(timeout_sec=10.0):
+            self.log("Servizio '/pump_control' non disponibile.")
+            return
+    
+        # Invia la richiesta
+        future = self.pump_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        result = future.result()
+    
+        # Aggiorna lo stato del pulsante in base al risultato
+        if result and result.success:
+            self.update_pump_button(new_state)
+            self.log(f"Pompa {'ON' if new_state else 'OFF'}: {result.message}")
+        else:
+            self.log(f"Errore pompa: {result.message if result else 'Nessuna risposta'}")
+    
     def update_pump_button(self, state):
+        # Cambia il colore del pulsante in base allo stato
         color = "green" if state else "red"
         self.pump_btn.config(bg=color)
 
     def toggle_valve(self):
+        # Determina lo stato attuale del pulsante (ON o OFF)
         current_state = self.valve_btn["bg"] == "green"
-        new_state = not current_state
-        success = self.set_valve_state(new_state)
-        if success:
-            self.update_valve_button(new_state)
-
-    def set_valve_state(self, state):
+        new_state = not current_state  # Inverte lo stato
+    
+        # Prepara la richiesta per il servizio ValveControl
         req = ValveControl.Request()
-        req.turn_on = state
-
+        req.turn_on = new_state
+    
+        # Controlla se il servizio è disponibile
         if not self.valve_client.wait_for_service(timeout_sec=10.0):
-            self.log("Servizio 'valve_control' non disponibile.")
-            return False
-
+            self.log("Servizio '/valve_control' non disponibile.")
+            return
+    
+        # Invia la richiesta
         future = self.valve_client.call_async(req)
         rclpy.spin_until_future_complete(self, future)
         result = future.result()
-
+    
+        # Aggiorna lo stato del pulsante in base al risultato
         if result and result.success:
-            self.log(f"Valvola {'ON' if state else 'OFF'}: {result.message}")
-            return True
+            self.update_valve_button(new_state)
+            self.log(f"Valvola {'ON' if new_state else 'OFF'}: {result.message}")
         else:
             self.log(f"Errore valvola: {result.message if result else 'Nessuna risposta'}")
-            return False
-
+    
     def update_valve_button(self, state):
+        # Cambia il colore del pulsante in base allo stato
         color = "green" if state else "red"
         self.valve_btn.config(bg=color)
 
     def emergency_stop(self):
         self.log("EMERGENZA ATTIVATA: Arresto di tutti i movimenti.")
         self.emergency_flag = True  # Attiva la flag di emergenza
-
+    
         # Arresta i motori
         for motor_id in range(3):
             try:
+                self.log(f"Inviando comando di emergenza al motore {motor_id}: angolo=90, velocità=0")
                 self.save_motor_position(motor_id, self.motor_sliders[motor_id].get())  # Salva la posizione attuale
+                self.send_motor_request(motor_id, 0, 0)  # Posiziona i motori a 90° (posizione neutra)
             except Exception as e:
                 self.log(f"Errore durante l'arresto del motore {motor_id}: {e}")
-
+    
         # Arresta la pompa
         try:
             self.set_pump_state(False)
             self.update_pump_button(False)
         except Exception as e:
             self.log(f"Errore durante lo spegnimento della pompa: {e}")
-
+    
         # Arresta la valvola
         try:
             self.set_valve_state(False)
             self.update_valve_button(False)
         except Exception as e:
             self.log(f"Errore durante la chiusura della valvola: {e}")
-
+    
         self.log("Emergenza completata.")
         self.emergency_flag = False  # Resetta la flag di emergenza
 
+    # Funzioni per salvare/caricare la posizione dei motori
     def save_motor_position(self, motor_id, angle):
         positions = self.load_motor_positions()
         positions[str(motor_id)] = angle
@@ -289,13 +324,50 @@ class CalibrationGUI(Node):
         self.get_logger().info(message)
 
     def run(self):
-        self.log("CalibrationGUI in esecuzione.")
+        self.log("Cruscotto in esecuzione.")
         self.root.mainloop()
 
+    def set_pump_state(self, state):
+        req = PumpControl.Request()
+        req.turn_on = state
+    
+        if not self.pump_client.wait_for_service(timeout_sec=10.0):
+            self.log("Servizio '/pump_control' non disponibile.")
+            return False
+    
+        future = self.pump_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        result = future.result()
+    
+        if result and result.success:
+            self.log(f"Pompa {'ON' if state else 'OFF'}: {result.message}")
+            return True
+        else:
+            self.log(f"Errore pompa: {result.message if result else 'Nessuna risposta'}")
+            return False
+    
+    def set_valve_state(self, state):
+        req = ValveControl.Request()
+        req.turn_on = state
+    
+        if not self.valve_client.wait_for_service(timeout_sec=10.0):
+            self.log("Servizio '/valve_control' non disponibile.")
+            return False
+    
+        future = self.valve_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        result = future.result()
+    
+        if result and result.success:
+            self.log(f"Valvola {'ON' if state else 'OFF'}: {result.message}")
+            return True
+        else:
+            self.log(f"Errore valvola: {result.message if result else 'Nessuna risposta'}")
+            return False
 
 def main():
     rclpy.init()
-    gui_node = CalibrationGUI()
+    gui_node = Cruscotto()
     try:
         gui_node.run()
     finally:
@@ -304,3 +376,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

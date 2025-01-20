@@ -14,8 +14,15 @@ def generate_launch_description():
     return LaunchDescription([
         Node(
             package='robot_controller',
+            executable='servo_control_service',
+            name='servo_control_service',
+            output='screen',
+            parameters=[params_file],
+        ),
+        Node(
+            package='robot_controller',
             executable='servo_control',
-            name='servo_control',
+            name='servo_control_action',
             output='screen',
             parameters=[params_file], 
         ),
@@ -30,6 +37,13 @@ def generate_launch_description():
             package='robot_controller',
             executable='calibration_gui',
             name='calibration_gui',
+            output='screen',
+            parameters=[params_file]
+        ),
+        Node(
+            package='robot_controller',
+            executable='cruscotto',
+            name='cruscotto',
             output='screen',
             parameters=[params_file]
         ),

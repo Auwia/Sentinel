@@ -1,0 +1,8 @@
+int32 motor_id
+float32 target_angle
+float32 target_speed
+int32 servo_type
+---
+bool success
+string status_message
+

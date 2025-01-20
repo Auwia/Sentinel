@@ -7,6 +7,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/MoveMotors.action"
   "srv/PumpControl.srv"
   "srv/ValveControl.srv"
+  "srv/SetServoAngle.srv"
   DEPENDENCIES builtin_interfaces
 )
 
