@@ -21,24 +21,10 @@ def generate_launch_description():
         ),
         Node(
             package='robot_controller',
-            executable='servo_control',
-            name='servo_control_action',
-            output='screen',
-            parameters=[params_file], 
-        ),
-        Node(
-            package='robot_controller',
             executable='camera_processor',
             name='camera_processor',
             output='screen',
             parameters=[params_file],
-        ),
-        Node(
-            package='robot_controller',
-            executable='calibration_gui',
-            name='calibration_gui',
-            output='screen',
-            parameters=[params_file]
         ),
         Node(
             package='robot_controller',
