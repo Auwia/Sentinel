@@ -189,7 +189,7 @@ class Cruscotto(Node):
         """
         self.log("Esecuzione della sequenza 'prendi' iniziata...")
         try:
-            self.send_motor_request(0, 90, 10)  # Motore 0: posizione iniziale
+            self.send_motor_request(0, 132, 10)  # Motore 0: posizione iniziale
             self.send_motor_request(1, 45, 10)  # Motore 1: posizione iniziale
             self.send_motor_request(2, 10, 10)  # Motore 2: posizione iniziale
 
@@ -199,9 +199,9 @@ class Cruscotto(Node):
                 self.send_motor_request(2, angle_2, 10)
 
             # Posizioni finali
-            self.send_motor_request(0, 90, 10)
-            self.send_motor_request(1, 20, 10)
-            self.send_motor_request(2, 90, 10)
+            self.send_motor_request(0, 132, 10)
+            self.send_motor_request(1, 25, 10)
+            self.send_motor_request(2, 92, 10)
 
             self.log("Sequenza 'prendi' completata.")
         except Exception as e:
