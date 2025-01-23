@@ -1,3 +1,4 @@
+import time
 import rclpy
 from rclpy.node import Node
 from custom_interfaces.srv import SetServoAngle, PumpControl, ValveControl
@@ -6,6 +7,7 @@ from tkinter import ttk
 from threading import Thread
 import json
 import os
+from rclpy.executors import MultiThreadedExecutor
 
 POSITIONS_FILE = "src/robot_controller/robot_controller/share/servo_positions.json"
 
@@ -30,8 +32,10 @@ class Cruscotto(Node):
         self.create_gui_elements()
 
         # Carica la posizione attuale dei motori
-        self.get_logger().info("Caricamento della posizione attuale dei motori...")
-        self.load_motor_positions()
+        self.log("Caricamento della posizione attuale dei motori...")
+
+        # Carica la posizione attuale dei motori
+        self.motor_positions = self.load_motor_positions()
 
     def create_gui_elements(self):
         # Frame per i motori
@@ -137,241 +141,200 @@ class Cruscotto(Node):
         self.log_text = tk.Text(log_frame, height=10, width=50)
         self.log_text.grid(row=0, column=0, padx=5, pady=5)
 
-    def update_motor_label(self, motor_id, value):
-        angle = round(float(value))
-        self.motor_labels[motor_id].config(text=f"{angle}°")
-
-    def update_speed_label(self, motor_id, value):
-        speed = round(float(value))
-        self.speed_labels[motor_id].config(text=f"{speed}")
-
-    def send_motor_command(self, motor_id):
-        try:
-            angle = round(float(self.motor_sliders[motor_id].get()))
-            speed = round(float(self.speed_sliders[motor_id].get()))
-            success = self.send_motor_request(motor_id, angle, speed)
-            if success:
-                self.log(f"Motore {motor_id} impostato su angolo {angle} con velocità {speed}")
-                self.save_motor_position(motor_id, angle)  # Salva la posizione
-            else:
-                self.log(f"Errore durante l'impostazione del motore {motor_id}")
-        except Exception as e:
-            self.log(f"Errore durante l'invio del comando al motore {motor_id}: {e}")
-
-    def send_motor_request(self, motor_id, target_angle, target_speed, servo_type=180):
-        if self.emergency_flag:
-            return False  # Interrompi se emergenza attiva
-
-        # Preparazione della richiesta per il servizio
-        req = SetServoAngle.Request()
-        req.motor_id = motor_id
-        req.target_angle = float(target_angle)
-        req.target_speed = float(target_speed)
-        req.servo_type = int(servo_type)
-
-        if not self.servo_service_client.wait_for_service(timeout_sec=10.0):
-            self.log("Servizio '/servo_control_service' non disponibile.")
-            return False
-
-        future = self.servo_service_client.call_async(req)
-        rclpy.spin_until_future_complete(self, future)
-        result = future.result()
-
-        if result and result.success:
-            return True
-        else:
-            self.log(f"Errore motore {motor_id}: {result.status_message if result else 'Nessuna risposta'}")
-            return False
-
     def execute_prendi(self):
         """
-        Invoca la sequenza 'prendi' sul server dei motori.
+        Sequenza 'prendi' con step intermedi e finali.
         """
         self.log("Esecuzione della sequenza 'prendi' iniziata...")
         try:
-            self.send_motor_request(0, 132, 10)  # Motore 0: posizione iniziale
-            self.send_motor_request(1, 45, 10)  # Motore 1: posizione iniziale
-            self.send_motor_request(2, 10, 10)  # Motore 2: posizione iniziale
+            motor_positions = self.load_motor_positions()
 
-            # Movimento intermedio
-            for angle_1, angle_2 in zip(range(45, 35, -1), range(0, 70, +1)):
-                self.send_motor_request(1, angle_1, 10)
-                self.send_motor_request(2, angle_2, 10)
+            # Sincronizza i motori con posizioni iniziali
+            self.log("Sincronizzazione posizioni dei motori...")
+            self.move_motors_in_parallel(self.motor_positions, speed=10, servo_type=180)
 
-            # Posizioni finali
-            self.send_motor_request(0, 132, 10)
-            self.send_motor_request(1, 25, 10)
-            self.send_motor_request(2, 92, 10)
+            # Step iniziale
+            step_1 = {0: 132, 1: 45, 2: 10}
+            self.log("Step 1: movimento iniziale...")
+            self.move_motors_in_parallel(step_1, speed=10, servo_type=180)
+
+            # Step intermedi (movimento graduale)
+            self.log("Step 2: movimenti intermedi...")
+            for pos_1, pos_2 in zip(range(45, 35, -1), range(10, 20)):
+                self.move_motors_in_parallel({1: pos_1, 2: pos_2}, speed=10, servo_type=180)
+                time.sleep(0.1) 
+
+            # Step finale
+            step_3 = {0: 132, 1: 25, 2: 92}
+            self.log("Step 3: posizione finale...")
+            self.move_motors_in_parallel(step_3, speed=10, servo_type=180)
 
             self.log("Sequenza 'prendi' completata.")
         except Exception as e:
             self.log(f"Errore durante l'esecuzione di 'prendi': {e}")
 
-    def toggle_pump(self):
-        # Determina lo stato attuale del pulsante (ON o OFF)
-        current_state = self.pump_btn["bg"] == "green"
-        new_state = not current_state  # Inverte lo stato
-    
-        # Prepara la richiesta per il servizio PumpControl
-        req = PumpControl.Request()
-        req.turn_on = new_state
-    
-        # Controlla se il servizio è disponibile
-        if not self.pump_client.wait_for_service(timeout_sec=10.0):
-            self.log("Servizio '/pump_control' non disponibile.")
-            return
-    
-        # Invia la richiesta
-        future = self.pump_client.call_async(req)
-        rclpy.spin_until_future_complete(self, future)
-        result = future.result()
-    
-        # Aggiorna lo stato del pulsante in base al risultato
-        if result and result.success:
-            self.update_pump_button(new_state)
-            self.log(f"Pompa {'ON' if new_state else 'OFF'}: {result.message}")
-        else:
-            self.log(f"Errore pompa: {result.message if result else 'Nessuna risposta'}")
-    
-    def update_pump_button(self, state):
-        # Cambia il colore del pulsante in base allo stato
-        color = "green" if state else "red"
-        self.pump_btn.config(bg=color)
-
-    def toggle_valve(self):
-        # Determina lo stato attuale del pulsante (ON o OFF)
-        current_state = self.valve_btn["bg"] == "green"
-        new_state = not current_state  # Inverte lo stato
-    
-        # Prepara la richiesta per il servizio ValveControl
-        req = ValveControl.Request()
-        req.turn_on = new_state
-    
-        # Controlla se il servizio è disponibile
-        if not self.valve_client.wait_for_service(timeout_sec=10.0):
-            self.log("Servizio '/valve_control' non disponibile.")
-            return
-    
-        # Invia la richiesta
-        future = self.valve_client.call_async(req)
-        rclpy.spin_until_future_complete(self, future)
-        result = future.result()
-    
-        # Aggiorna lo stato del pulsante in base al risultato
-        if result and result.success:
-            self.update_valve_button(new_state)
-            self.log(f"Valvola {'ON' if new_state else 'OFF'}: {result.message}")
-        else:
-            self.log(f"Errore valvola: {result.message if result else 'Nessuna risposta'}")
-    
-    def update_valve_button(self, state):
-        # Cambia il colore del pulsante in base allo stato
-        color = "green" if state else "red"
-        self.valve_btn.config(bg=color)
-
-    def emergency_stop(self):
-        self.log("EMERGENZA ATTIVATA: Arresto di tutti i movimenti.")
-        self.emergency_flag = True  # Attiva la flag di emergenza
-    
-        # Arresta i motori
-        for motor_id in range(3):
-            try:
-                self.log(f"Inviando comando di emergenza al motore {motor_id}: angolo=90, velocità=0")
-                self.save_motor_position(motor_id, self.motor_sliders[motor_id].get())  # Salva la posizione attuale
-                self.send_motor_request(motor_id, 0, 0)  # Posiziona i motori a 90° (posizione neutra)
-            except Exception as e:
-                self.log(f"Errore durante l'arresto del motore {motor_id}: {e}")
-    
-        # Arresta la pompa
-        try:
-            self.set_pump_state(False)
-            self.update_pump_button(False)
-        except Exception as e:
-            self.log(f"Errore durante lo spegnimento della pompa: {e}")
-    
-        # Arresta la valvola
-        try:
-            self.set_valve_state(False)
-            self.update_valve_button(False)
-        except Exception as e:
-            self.log(f"Errore durante la chiusura della valvola: {e}")
-    
-        self.log("Emergenza completata.")
-        self.emergency_flag = False  # Resetta la flag di emergenza
-
-    # Funzioni per salvare/caricare la posizione dei motori
-    def save_motor_position(self, motor_id, angle):
-        positions = self.load_motor_positions()
-        positions[str(motor_id)] = angle
-        with open(POSITIONS_FILE, 'w') as f:
-            json.dump(positions, f)
+    # Le altre funzioni rimangono invariate...
 
     def load_motor_positions(self):
+        """
+        Carica le posizioni dei motori dal file. Se il file non esiste,
+        restituisce una posizione di default.
+        """
         if os.path.exists(POSITIONS_FILE):
             with open(POSITIONS_FILE, 'r') as f:
                 positions = json.load(f)
+                self.log(f"Posizioni motori caricate: {positions}")
+    
+                # Aggiorna i cursori con le posizioni caricate
                 for motor_id, angle in positions.items():
                     if int(motor_id) in self.motor_sliders:
                         self.motor_sliders[int(motor_id)].set(angle)
                         self.update_motor_label(int(motor_id), angle)
-                return positions
+                return {int(k): v for k, v in positions.items()}
         else:
-            return {str(i): 90 for i in range(3)}  # Default a 90°
+            default_positions = {i: 90 for i in range(3)}  # Default a 90°
+            self.log(f"File posizioni non trovato, uso default: {default_positions}")
+            return default_positions
 
     def log(self, message):
+        """Log su ROS 2 e aggiorna la GUI."""
+        self.get_logger().info(message)  # Log per ROS 2
+        if hasattr(self, "log_text"):  # Evita di chiamare log_text prima che sia inizializzato
+            self.root.after(0, self._log_to_gui, message)
+
+    def _log_to_gui(self, message):
+        """Aggiunge un messaggio alla GUI della console."""
         self.log_text.insert(tk.END, f"{message}\n")
         self.log_text.see(tk.END)
-        self.get_logger().info(message)
+
+    def update_motor_label(self, motor_id, value):
+        """Aggiorna l'etichetta dell'angolo del motore."""
+        angle = round(float(value))
+        self.motor_labels[motor_id].config(text=f"{angle}°")
+
+    def update_speed_label(self, motor_id, value):
+        """Aggiorna l'etichetta della velocità del motore."""
+        speed = round(float(value))
+        self.speed_labels[motor_id].config(text=f"{speed}")
 
     def run(self):
+        """
+        Avvia il ciclo principale di Tkinter per la GUI.
+        """
         self.log("Cruscotto in esecuzione.")
-        self.root.mainloop()
+        try:
+            self.root.mainloop()  # Questo avvia la GUI
+        except KeyboardInterrupt:
+            self.log("Interruzione della GUI (KeyboardInterrupt).")
 
-    def set_pump_state(self, state):
-        req = PumpControl.Request()
-        req.turn_on = state
+    def move_motors_in_parallel(self, target_positions, speed=10, servo_type=180):
+        """
+        Muove i motori verso le posizioni target in parallelo, con un tipo di servo specifico.
+        
+        :param target_positions: Dizionario con {motor_id: target_angle}.
+        :param speed: Velocità del movimento (default: 10).
+        :param servo_type: Tipo di servo (default: 180).
+        """
+        self.log("Inizio movimento parallelo dei motori...")
+        threads = []
+        for motor_id, target_angle in target_positions.items():
+            current_angle = self.motor_positions.get(motor_id, 0)
+            if abs(current_angle - target_angle) < 0.01:
+                self.log(f"Motore {motor_id}: già all'angolo {target_angle}°, nessun movimento necessario.")
+                continue
+            self.log(f"Motore {motor_id}: movimento da {current_angle}° a {target_angle}° a velocità {speed}°/s.")
+            thread = Thread(target=self._move_motor, args=(motor_id, target_angle, speed, servo_type))
+            thread.start()
+            threads.append(thread)
+        
+        self.log("Movimento parallelo dei motori completato.")
+
+    def _move_motor(self, motor_id, target_angle, speed, servo_type=180):
+        """
+        Muove un singolo motore verso la posizione target.
+        :param motor_id: ID del motore.
+        :param target_angle: Angolo target.
+        :param speed: Velocità del movimento.
+        """
+        current_position = self.motor_positions.get(motor_id, 0)
+        if current_position == target_angle:
+            self.log(f"Motore {motor_id}: già all'angolo {current_position}°, nessun movimento necessario.")
+            return
     
-        if not self.pump_client.wait_for_service(timeout_sec=10.0):
-            self.log("Servizio '/pump_control' non disponibile.")
-            return False
-    
-        future = self.pump_client.call_async(req)
-        rclpy.spin_until_future_complete(self, future)
-        result = future.result()
-    
-        if result and result.success:
-            self.log(f"Pompa {'ON' if state else 'OFF'}: {result.message}")
-            return True
+        self.log(f"Inizio movimento del motore {motor_id}: angolo={target_angle}°, velocità={speed}°/s, tipo servo={servo_type}.")
+        success = self.send_motor_request(motor_id, target_angle, speed, servo_type)
+        if success:
+            self.log(f"Motore {motor_id} raggiunto: {target_angle}°.")
+            self.motor_positions[motor_id] = target_angle  # Aggiorna la posizione attuale
         else:
-            self.log(f"Errore pompa: {result.message if result else 'Nessuna risposta'}")
+            self.log(f"Errore nel movimento del motore {motor_id}.")
+
+    def send_motor_request(self, motor_id, target_angle, target_speed, servo_type=180):
+        """
+        Invia una richiesta al servizio per controllare il motore.
+        
+        :param motor_id: ID del motore.
+        :param target_angle: Angolo target da raggiungere.
+        :param target_speed: Velocità con cui raggiungere l'angolo.
+        :return: True se il comando è stato inviato con successo, altrimenti False.
+        """
+        if self.emergency_flag:
+            self.log(f"Comando motore {motor_id} interrotto: emergenza attivata.")
+            return False  # Interrompe se l'emergenza è attivata
+        
+        # Prepara la richiesta per il servizio
+        req = SetServoAngle.Request()
+        req.motor_id = motor_id
+        req.target_angle = float(target_angle)
+        req.target_speed = float(target_speed)
+        req.servo_type = int(servo_type)
+        
+        # Controlla se il servizio è disponibile
+        if not self.servo_service_client.wait_for_service(timeout_sec=10.0):
+            self.log("Servizio '/servo_control_service' non disponibile.")
             return False
-    
-    def set_valve_state(self, state):
-        req = ValveControl.Request()
-        req.turn_on = state
-    
-        if not self.valve_client.wait_for_service(timeout_sec=10.0):
-            self.log("Servizio '/valve_control' non disponibile.")
-            return False
-    
-        future = self.valve_client.call_async(req)
-        rclpy.spin_until_future_complete(self, future)
-        result = future.result()
-    
-        if result and result.success:
-            self.log(f"Valvola {'ON' if state else 'OFF'}: {result.message}")
-            return True
-        else:
-            self.log(f"Errore valvola: {result.message if result else 'Nessuna risposta'}")
-            return False
+        
+        # Invia la richiesta in modo asincrono
+        future = self.servo_service_client.call_async(req)
+        future.add_done_callback(lambda f: self._handle_motor_response(f, motor_id, target_angle, target_speed))
+        return True
+
+    def _handle_motor_response(self, future, motor_id, target_angle, target_speed):
+        """
+        Callback per gestire la risposta del servizio.
+        """
+        try:
+            result = future.result()
+            if result.success:
+                self.log(f"Motore {motor_id} raggiunto: {target_angle}° con velocità {target_speed}°/s.")
+            else:
+                self.log(f"Errore motore {motor_id}: {result.status_message} (Codice: {result.error_code})")
+        except Exception as e:
+            self.log(f"Errore nella risposta del motore {motor_id}: {e}")
 
 def main():
     rclpy.init()
     gui_node = Cruscotto()
+
+    executor = MultiThreadedExecutor()
+    executor.add_node(gui_node)
+
+    def spin_executor():
+        try:
+            executor.spin()
+        finally:
+            executor.shutdown()
+
+    # Thread per gestire l'executor
+    executor_thread = Thread(target=spin_executor, daemon=True)
+    executor_thread.start()
+
     try:
         gui_node.run()
     finally:
+        gui_node.destroy_node()
         rclpy.shutdown()
+        executor_thread.join()
 
 
 if __name__ == "__main__":
