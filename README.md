@@ -2,16 +2,18 @@
 
 Developed with ROS 2 - Jazzy Jalisco - https://docs.ros.org/en/jazzy/Installation.html
 
-sudo apt install python3-rpi.gpio
-pip3 install RPi.GPIO
-
 git clone git@github.com:Auwia/Sentinel.git
 
 cd Sentinel
 
-colcon build
+./scripts/setup_env.sh
 
-source install/setup.bash
+./scripts/build.sh
+
+./scripts/run.sh
+
+
+###############################
 
 Server:
 ros2 launch robot_controller robot_control_launch.py
