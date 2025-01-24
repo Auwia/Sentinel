@@ -61,7 +61,7 @@ class Cruscotto(Node):
             slider.grid(row=motor_id * 2, column=1, padx=5, pady=5)
             self.motor_sliders[motor_id] = slider
 
-            angle_label = ttk.Label(motors_frame, text="0°")
+            angle_label = ttk.Label(motors_frame, text="0\u00B0")
             angle_label.grid(row=motor_id * 2, column=2, padx=5, pady=5)
             self.motor_labels[motor_id] = angle_label
 
@@ -160,9 +160,17 @@ class Cruscotto(Node):
 
             # Step intermedi (movimento graduale)
             self.log("Step 2: movimenti intermedi...")
-            for pos_1, pos_2 in zip(range(45, 35, -1), range(10, 20)):
-                self.move_motors_in_parallel({1: pos_1, 2: pos_2}, speed=10, servo_type=180)
-                time.sleep(0.1) 
+            for pos_1, pos_2 in zip(range(45, 35, -2), range(10, 20, 2)):
+                start_time = time.time()
+                speed = 10 
+                distance = max(abs(pos_1 - self.motor_positions[1]), abs(pos_2 - self.motor_positions[2]))
+                pause = max(distance / speed if distance > 0 else 0, 0.1)  
+
+                self.move_motors_in_parallel({1: pos_1, 2: pos_2}, speed=speed, servo_type=180)
+                end_time = time.time()
+
+                self.log(f"Step completato in {end_time - start_time:.2f} secondi. Pausa di {pause:.2f} secondi.")
+                time.sleep(pause)
 
             # Step finale
             step_3 = {0: 132, 1: 25, 2: 92}
@@ -192,7 +200,7 @@ class Cruscotto(Node):
                         self.update_motor_label(int(motor_id), angle)
                 return {int(k): v for k, v in positions.items()}
         else:
-            default_positions = {i: 90 for i in range(3)}  # Default a 90°
+            default_positions = {i: 90 for i in range(3)}  
             self.log(f"File posizioni non trovato, uso default: {default_positions}")
             return default_positions
 
@@ -210,7 +218,7 @@ class Cruscotto(Node):
     def update_motor_label(self, motor_id, value):
         """Aggiorna l'etichetta dell'angolo del motore."""
         angle = round(float(value))
-        self.motor_labels[motor_id].config(text=f"{angle}°")
+        self.motor_labels[motor_id].config(text=f"{angle}\u00B0")
 
     def update_speed_label(self, motor_id, value):
         """Aggiorna l'etichetta della velocità del motore."""
@@ -240,15 +248,13 @@ class Cruscotto(Node):
         for motor_id, target_angle in target_positions.items():
             current_angle = self.motor_positions.get(motor_id, 0)
             if abs(current_angle - target_angle) < 0.01:
-                self.log(f"Motore {motor_id}: già all'angolo {target_angle}°, nessun movimento necessario.")
+                self.log(f"Motore {motor_id}: già all'angolo {target_angle}\u00B0, nessun movimento necessario.")
                 continue
-            self.log(f"Motore {motor_id}: movimento da {current_angle}° a {target_angle}° a velocità {speed}°/s.")
-            thread = Thread(target=self._move_motor, args=(motor_id, target_angle, speed, servo_type))
+            self.log(f"Motore {motor_id}: movimento da {current_angle}\u00B0 a {target_angle}\u00B0 a velocità {speed}\u00B0/s.")
+            thread = Thread(target=self._move_motor, args=(motor_id, target_angle, speed, servo_type), name=f"Thread-Motor-{motor_id}")
             thread.start()
             threads.append(thread)
         
-        self.log("Movimento parallelo dei motori completato.")
-
     def _move_motor(self, motor_id, target_angle, speed, servo_type=180):
         """
         Muove un singolo motore verso la posizione target.
@@ -258,13 +264,17 @@ class Cruscotto(Node):
         """
         current_position = self.motor_positions.get(motor_id, 0)
         if current_position == target_angle:
-            self.log(f"Motore {motor_id}: già all'angolo {current_position}°, nessun movimento necessario.")
+            self.log(f"Motore {motor_id}: già all'angolo {current_position}\u00B0, nessun movimento necessario.")
             return
     
-        self.log(f"Inizio movimento del motore {motor_id}: angolo={target_angle}°, velocità={speed}°/s, tipo servo={servo_type}.")
+        start_time = time.time()
+        start_time_readable = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))
+        self.log(f"Inizio movimento del motore {motor_id}: angolo={target_angle}\u00B0, velocità={speed}\u00B0/s, tipo servo={servo_type}. START_TIME: {start_time_readable}")
         success = self.send_motor_request(motor_id, target_angle, speed, servo_type)
         if success:
-            self.log(f"Motore {motor_id} raggiunto: {target_angle}°.")
+            end_time = time.time()
+            end_time_readable = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end_time))
+            self.log(f"Motore {motor_id} raggiunto: {target_angle}\u00B0. END_TIME: {end_time_readable}")
             self.motor_positions[motor_id] = target_angle  # Aggiorna la posizione attuale
         else:
             self.log(f"Errore nel movimento del motore {motor_id}.")
@@ -306,7 +316,7 @@ class Cruscotto(Node):
         try:
             result = future.result()
             if result.success:
-                self.log(f"Motore {motor_id} raggiunto: {target_angle}° con velocità {target_speed}°/s.")
+                self.log(f"Motore {motor_id} raggiunto: {target_angle}\u00B0 con velocità {target_speed}\u00B0/s.")
             else:
                 self.log(f"Errore motore {motor_id}: {result.status_message} (Codice: {result.error_code})")
         except Exception as e:
