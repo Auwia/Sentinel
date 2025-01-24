@@ -1,7 +1,7 @@
 import time
 import rclpy
 from rclpy.node import Node
-from custom_interfaces.srv import SetServoAngle, PumpControl, ValveControl
+from custom_interfaces.srv import SetServoAngle, PumpControl, ValveControl, EmergencyStop
 import tkinter as tk
 from tkinter import ttk
 from threading import Thread
@@ -16,6 +16,10 @@ class Cruscotto(Node):
         super().__init__('cruscotto')
         self.get_logger().info("Cruscotto avviato.")
 
+        self.motor_positions = {}
+        self.current_labels = {} 
+        self.motor_logs = {i: [] for i in range(3)}
+
         # ROS 2 Service Clients
         self.servo_service_client = self.create_client(SetServoAngle, '/servo_control_service')
         self.pump_client = self.create_client(PumpControl, '/pump_control')
@@ -23,6 +27,7 @@ class Cruscotto(Node):
 
         # Flag di emergenza
         self.emergency_flag = False
+        self.emergency_client = self.create_client(EmergencyStop, '/emergency_stop')  # Nuovo client
 
         # Tkinter GUI setup
         self.root = tk.Tk()
@@ -38,54 +43,85 @@ class Cruscotto(Node):
         self.motor_positions = self.load_motor_positions()
 
     def create_gui_elements(self):
-        # Frame per i motori
+        # Frame per i motori (contenitore principale)
         motors_frame = ttk.LabelFrame(self.root, text="Motori")
         motors_frame.grid(row=0, column=0, padx=10, pady=10)
-
+    
         self.motor_sliders = {}
         self.motor_labels = {}
         self.speed_sliders = {}
         self.speed_labels = {}
-
-        for motor_id in range(3):
-            lbl = ttk.Label(motors_frame, text=f"Motore {motor_id}")
-            lbl.grid(row=motor_id * 2, column=0, padx=5, pady=5)
-
-            slider = ttk.Scale(
-                motors_frame,
+        self.motor_logs = {}
+    
+        for motor_id in range(3):  # Tre motori
+            # Frame per ciascun motore
+            motor_frame = ttk.LabelFrame(motors_frame, text=f"Motore {motor_id}")
+            motor_frame.grid(row=0, column=motor_id, padx=10, pady=10)
+    
+            # Slider angolo
+            angle_slider = ttk.Scale(
+                motor_frame,
                 from_=0,
                 to=180,
-                orient="horizontal",
-                command=lambda val, m=motor_id: self.update_motor_label(m, val)
+                orient="horizontal"
             )
-            slider.grid(row=motor_id * 2, column=1, padx=5, pady=5)
-            self.motor_sliders[motor_id] = slider
-
-            angle_label = ttk.Label(motors_frame, text="0\u00B0")
-            angle_label.grid(row=motor_id * 2, column=2, padx=5, pady=5)
-            self.motor_labels[motor_id] = angle_label
-
+            angle_slider.set(self.motor_positions.get(motor_id, 0))  # Posizione iniziale
+            angle_slider.grid(row=0, column=0, columnspan=2, padx=5, pady=5)
+            self.motor_sliders[motor_id] = angle_slider  # Popola il dizionario
+    
+            # Etichetta angolo
+            angle_label = ttk.Label(motor_frame, text="0\u00B0")
+            angle_label.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
+            self.motor_labels[motor_id] = angle_label  # Popola il dizionario
+    
+            # Slider velocità
             speed_slider = ttk.Scale(
-                motors_frame,
+                motor_frame,
                 from_=1,
                 to=100,
-                orient="horizontal",
-                command=lambda val, m=motor_id: self.update_speed_label(m, val)
+                orient="horizontal"
             )
-            speed_slider.grid(row=motor_id * 2 + 1, column=1, padx=5, pady=5)
-            self.speed_sliders[motor_id] = speed_slider
-
-            speed_label = ttk.Label(motors_frame, text="1")
-            speed_label.grid(row=motor_id * 2 + 1, column=2, padx=5, pady=5)
-            self.speed_labels[motor_id] = speed_label
-
-            btn = ttk.Button(motors_frame, text="Invia", command=lambda m=motor_id: Thread(target=self.send_motor_command, args=(m,)).start())
-            btn.grid(row=motor_id * 2, column=3, rowspan=2, padx=5, pady=5)
-
-        # Frame per pompa e valvola
+            speed_slider.set(10)  # Valore iniziale della velocità
+            speed_slider.grid(row=2, column=0, columnspan=2, padx=5, pady=5)
+            self.speed_sliders[motor_id] = speed_slider  # Popola il dizionario
+    
+            # Etichetta velocità
+            speed_label = ttk.Label(motor_frame, text="10")
+            speed_label.grid(row=3, column=0, columnspan=2, padx=5, pady=5)
+            self.speed_labels[motor_id] = speed_label  # Popola il dizionario
+    
+            # Pulsante Invio
+            btn_invia = ttk.Button(
+                motor_frame,
+                text="Invia",
+                command=lambda m=motor_id: Thread(target=self.send_motor_command, args=(m,)).start()
+            )
+            btn_invia.grid(row=4, column=0, padx=5, pady=5)
+    
+            # Pulsante STOP
+            btn_stop = ttk.Button(
+                motor_frame,
+                text="STOP",
+                command=lambda m=motor_id: Thread(target=self.stop_motor, args=(m,)).start()
+            )
+            btn_stop.grid(row=4, column=1, padx=5, pady=5)
+    
+            # Log individuale per ciascun motore
+            motor_log = tk.Text(motor_frame, height=5, width=30, state=tk.DISABLED, wrap=tk.WORD)
+            motor_log.grid(row=5, column=0, columnspan=2, padx=5, pady=5)
+            self.motor_logs[motor_id] = motor_log  # Popola il dizionario
+    
+        # Aggiungere i callback solo dopo che i dizionari sono popolati
+        for motor_id, slider in self.motor_sliders.items():
+            slider.config(command=lambda val, m=motor_id: self.update_motor_label(m, val))
+    
+        for motor_id, slider in self.speed_sliders.items():
+            slider.config(command=lambda val, m=motor_id: self.update_speed_label(m, val))
+    
+        # Frame per i controlli generali
         controls_frame = ttk.LabelFrame(self.root, text="Controlli")
         controls_frame.grid(row=1, column=0, padx=10, pady=10)
-
+    
         # Bottone Pompa
         self.pump_btn = tk.Button(
             controls_frame,
@@ -97,7 +133,7 @@ class Cruscotto(Node):
             command=lambda: Thread(target=self.toggle_pump).start()
         )
         self.pump_btn.grid(row=0, column=0, padx=10, pady=10)
-
+    
         # Bottone Valvola
         self.valve_btn = tk.Button(
             controls_frame,
@@ -109,7 +145,7 @@ class Cruscotto(Node):
             command=lambda: Thread(target=self.toggle_valve).start()
         )
         self.valve_btn.grid(row=0, column=1, padx=10, pady=10)
-
+    
         # Pulsante di emergenza
         emergency_btn = tk.Button(
             controls_frame,
@@ -121,7 +157,7 @@ class Cruscotto(Node):
             command=lambda: Thread(target=self.emergency_stop).start()
         )
         emergency_btn.grid(row=1, column=0, columnspan=2, pady=10)
-
+    
         # Pulsante Prendi
         prendi_btn = tk.Button(
             controls_frame,
@@ -133,18 +169,29 @@ class Cruscotto(Node):
             command=lambda: Thread(target=self.execute_prendi).start()
         )
         prendi_btn.grid(row=2, column=0, columnspan=2, pady=10)
-
-        # Console log
+    
+        # Frame per il log generale
         log_frame = ttk.LabelFrame(self.root, text="Console")
-        log_frame.grid(row=2, column=0, padx=10, pady=10)
-
-        self.log_text = tk.Text(log_frame, height=10, width=50)
+        log_frame.grid(row=2, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+    
+        self.log_text = tk.Text(log_frame, height=15, width=100)
         self.log_text.grid(row=0, column=0, padx=5, pady=5)
+
+    def stop_motor(self, motor_id):
+        """Interrompe il movimento del motore."""
+        self.log(f"Interruzione del motore {motor_id}.")
+        self.motor_positions[motor_id] = self.motor_positions[motor_id]  # Mantieni la posizione attuale
+        self.update_current_label(motor_id, self.motor_positions[motor_id])
 
     def execute_prendi(self):
         """
         Sequenza 'prendi' con step intermedi e finali.
         """
+
+        if self.emergency_flag:
+            self.log("Impossibile eseguire 'prendi': emergenza attiva.")
+            return
+
         self.log("Esecuzione della sequenza 'prendi' iniziata...")
         try:
             motor_positions = self.load_motor_positions()
@@ -154,30 +201,33 @@ class Cruscotto(Node):
             self.move_motors_in_parallel(self.motor_positions, speed=10, servo_type=180)
 
             # Step iniziale
-            step_1 = {0: 132, 1: 45, 2: 10}
-            self.log("Step 1: movimento iniziale...")
-            self.move_motors_in_parallel(step_1, speed=10, servo_type=180)
+            if not self.emergency_flag:
+                step_1 = {0: 132, 1: 45, 2: 10}
+                self.log("Step 1: movimento iniziale...")
+                self.move_motors_in_parallel(step_1, speed=10, servo_type=180)
 
             # Step intermedi (movimento graduale)
-            self.log("Step 2: movimenti intermedi...")
-            for pos_1, pos_2 in zip(range(45, 35, -2), range(10, 20, 2)):
-                start_time = time.time()
-                speed = 10 
-                distance = max(abs(pos_1 - self.motor_positions[1]), abs(pos_2 - self.motor_positions[2]))
-                pause = max(distance / speed if distance > 0 else 0, 0.1)  
-
-                self.move_motors_in_parallel({1: pos_1, 2: pos_2}, speed=speed, servo_type=180)
-                end_time = time.time()
-
-                self.log(f"Step completato in {end_time - start_time:.2f} secondi. Pausa di {pause:.2f} secondi.")
-                time.sleep(pause)
+            if not self.emergency_flag:
+                self.log("Step 2: movimenti intermedi...")
+                for pos_1, pos_2 in zip(range(45, 35, -2), range(10, 20, 2)):
+                    start_time = time.time()
+                    speed = 10 
+                    distance = max(abs(pos_1 - self.motor_positions[1]), abs(pos_2 - self.motor_positions[2]))
+                    pause = max(distance / speed if distance > 0 else 0, 0.1)  
+                    if not self.emergency_flag:
+                            self.move_motors_in_parallel({1: pos_1, 2: pos_2}, speed=speed, servo_type=180)
+                            end_time = time.time()
+                            self.log(f"Step completato in {end_time - start_time:.2f} secondi. Pausa di {pause:.2f} secondi.")
+                    time.sleep(pause)
 
             # Step finale
-            step_3 = {0: 132, 1: 25, 2: 92}
-            self.log("Step 3: posizione finale...")
-            self.move_motors_in_parallel(step_3, speed=10, servo_type=180)
+            if not self.emergency_flag:
+                step_3 = {0: 132, 1: 25, 2: 92}
+                self.log("Step 3: posizione finale...")
+                self.move_motors_in_parallel(step_3, speed=10, servo_type=180)
 
             self.log("Sequenza 'prendi' completata.")
+
         except Exception as e:
             self.log(f"Errore durante l'esecuzione di 'prendi': {e}")
 
@@ -222,8 +272,9 @@ class Cruscotto(Node):
 
     def update_speed_label(self, motor_id, value):
         """Aggiorna l'etichetta della velocità del motore."""
-        speed = round(float(value))
-        self.speed_labels[motor_id].config(text=f"{speed}")
+        if motor_id in self.speed_labels:
+            speed = round(float(value))
+            self.speed_labels[motor_id].config(text=f"{speed}")
 
     def run(self):
         """
@@ -245,12 +296,24 @@ class Cruscotto(Node):
         """
         self.log("Inizio movimento parallelo dei motori...")
         threads = []
+
         for motor_id, target_angle in target_positions.items():
+
+            if self.emergency_flag:
+                self.log("Movimento parallelo interrotto per emergenza.")
+                return
+
             current_angle = self.motor_positions.get(motor_id, 0)
             if abs(current_angle - target_angle) < 0.01:
-                self.log(f"Motore {motor_id}: già all'angolo {target_angle}\u00B0, nessun movimento necessario.")
+                message = f"Motore {motor_id}: già all'angolo {current_angle}\u00B0, nessun movimento necessario."
+                self.log(message)
+                self.root.after(0, self._update_motor_log, motor_id, message)
                 continue
-            self.log(f"Motore {motor_id}: movimento da {current_angle}\u00B0 a {target_angle}\u00B0 a velocità {speed}\u00B0/s.")
+
+            message = f"Motore {motor_id}: movimento da {current_angle}\u00B0 a {target_angle}\u00B0 a velocità {speed}\u00B0/s."
+            self.log(message)
+            self.root.after(0, self._update_motor_log, motor_id, message)  # Aggiungi al log privato del motore
+   
             thread = Thread(target=self._move_motor, args=(motor_id, target_angle, speed, servo_type), name=f"Thread-Motor-{motor_id}")
             thread.start()
             threads.append(thread)
@@ -262,6 +325,10 @@ class Cruscotto(Node):
         :param target_angle: Angolo target.
         :param speed: Velocità del movimento.
         """
+        if self.emergency_flag:
+            self.log(f"Motore {motor_id}: movimento interrotto per emergenza.")
+            return
+    
         current_position = self.motor_positions.get(motor_id, 0)
         if current_position == target_angle:
             self.log(f"Motore {motor_id}: già all'angolo {current_position}\u00B0, nessun movimento necessario.")
@@ -270,14 +337,44 @@ class Cruscotto(Node):
         start_time = time.time()
         start_time_readable = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))
         self.log(f"Inizio movimento del motore {motor_id}: angolo={target_angle}\u00B0, velocità={speed}\u00B0/s, tipo servo={servo_type}. START_TIME: {start_time_readable}")
+    
         success = self.send_motor_request(motor_id, target_angle, speed, servo_type)
         if success:
             end_time = time.time()
             end_time_readable = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end_time))
             self.log(f"Motore {motor_id} raggiunto: {target_angle}\u00B0. END_TIME: {end_time_readable}")
+            log_entry = f"Motore {motor_id} raggiunto: {target_angle}\u00B0. Velocità: {speed}\u00B0/s."
+            self.root.after(0, self._update_motor_log, motor_id, log_entry)
+    
             self.motor_positions[motor_id] = target_angle  # Aggiorna la posizione attuale
+            self.update_current_label(motor_id, target_angle)
         else:
             self.log(f"Errore nel movimento del motore {motor_id}.")
+
+    def _update_motor_log(self, motor_id, log_entry):
+        """Aggiorna il log del motore specifico nel widget Text."""
+        motor_log_widget = self.motor_logs.get(motor_id)
+        if motor_log_widget:
+            motor_log_widget.config(state=tk.NORMAL)  # Abilita modifiche
+            motor_log_widget.insert(tk.END, f"{log_entry}\n")
+            motor_log_widget.see(tk.END)  # Scorri fino alla fine
+            motor_log_widget.config(state=tk.DISABLED)  # Disabilita modifiche
+
+    def show_motor_log(self, motor_id):
+        """Mostra il log del motore nella console generale."""
+        motor_log_widget = self.motor_logs[motor_id]
+        motor_log_widget.config(state=tk.NORMAL)
+        log_content = motor_log_widget.get("1.0", tk.END)
+        motor_log_widget.config(state=tk.DISABLED)
+    
+        # Pulire il log della console generale e copiarci il contenuto
+        self.log_text.delete(1.0, tk.END)
+        self.log_text.insert(tk.END, log_content)
+
+    def update_current_label(self, motor_id, angle):
+        """Aggiorna la posizione corrente nella GUI."""
+        if motor_id in self.current_labels:
+            self.current_labels[motor_id].config(text=f"Corrente: {angle}\u00B0")
 
     def send_motor_request(self, motor_id, target_angle, target_speed, servo_type=180):
         """
@@ -317,10 +414,165 @@ class Cruscotto(Node):
             result = future.result()
             if result.success:
                 self.log(f"Motore {motor_id} raggiunto: {target_angle}\u00B0 con velocità {target_speed}\u00B0/s.")
-            else:
-                self.log(f"Errore motore {motor_id}: {result.status_message} (Codice: {result.error_code})")
         except Exception as e:
             self.log(f"Errore nella risposta del motore {motor_id}: {e}")
+
+    def emergency_stop(self):
+        """Gestisce la modalità di emergenza."""
+        self.emergency_flag = True
+        self.log("Emergenza attivata. Arresto di tutti i motori.")
+
+        # Invoca il servizio di emergenza nel nodo `servo_control_service`
+        if not self.emergency_client.wait_for_service(timeout_sec=5.0):
+            self.log("Servizio '/emergency_stop' non disponibile.")
+        else:
+            request = EmergencyStop.Request()
+            request.activate = True
+            future = self.emergency_client.call_async(request)
+            rclpy.spin_until_future_complete(self, future)
+    
+        # Arresta la pompa
+        try:
+            self.set_pump_state(False)
+            self.update_pump_button(False)
+        except Exception as e:
+            self.log(f"Errore durante lo spegnimento della pompa: {e}")
+    
+        # Arresta la valvola
+        try:
+            self.set_valve_state(False)
+            self.update_valve_button(False)
+        except Exception as e:
+            self.log(f"Errore durante la chiusura della valvola: {e}")
+    
+        # Arresta i motori impostando le loro posizioni attuali
+        for motor_id in self.motor_positions:
+            self.stop_motor(motor_id)
+    
+        # Aggiorna la GUI per riflettere lo stato di emergenza
+        self.root.after(0, lambda: self.log_text.insert(tk.END, "Modalità di emergenza attivata.\n"))
+
+        self.log("Emergenza completata.")
+        self.emergency_flag = False  # Resetta la flag di emergenza
+    
+    def toggle_pump(self):
+        # Determina lo stato attuale del pulsante (ON o OFF)
+        current_state = self.pump_btn["bg"] == "green"
+        new_state = not current_state  # Inverte lo stato
+    
+        # Prepara la richiesta per il servizio PumpControl
+        req = PumpControl.Request()
+        req.turn_on = new_state
+    
+        # Controlla se il servizio è disponibile
+        if not self.pump_client.wait_for_service(timeout_sec=10.0):
+            self.log("Servizio '/pump_control' non disponibile.")
+            return
+    
+        # Invia la richiesta
+        future = self.pump_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        result = future.result()
+    
+        # Aggiorna lo stato del pulsante in base al risultato
+        if result and result.success:
+            self.update_pump_button(new_state)
+            self.log(f"Pompa {'ON' if new_state else 'OFF'}: {result.message}")
+        else:
+            self.log(f"Errore pompa: {result.message if result else 'Nessuna risposta'}")
+    
+    def update_pump_button(self, state):
+        # Cambia il colore del pulsante in base allo stato
+        color = "green" if state else "red"
+        self.pump_btn.config(bg=color)
+
+    def toggle_valve(self):
+        # Determina lo stato attuale del pulsante (ON o OFF)
+        current_state = self.valve_btn["bg"] == "green"
+        new_state = not current_state  # Inverte lo stato
+    
+        # Prepara la richiesta per il servizio ValveControl
+        req = ValveControl.Request()
+        req.turn_on = new_state
+    
+        # Controlla se il servizio è disponibile
+        if not self.valve_client.wait_for_service(timeout_sec=10.0):
+            self.log("Servizio '/valve_control' non disponibile.")
+            return
+    
+        # Invia la richiesta
+        future = self.valve_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        result = future.result()
+    
+        # Aggiorna lo stato del pulsante in base al risultato
+        if result and result.success:
+            self.update_valve_button(new_state)
+            self.log(f"Valvola {'ON' if new_state else 'OFF'}: {result.message}")
+        else:
+            self.log(f"Errore valvola: {result.message if result else 'Nessuna risposta'}")
+    
+    def update_valve_button(self, state):
+        # Cambia il colore del pulsante in base allo stato
+        color = "green" if state else "red"
+        self.valve_btn.config(bg=color)
+
+    def send_motor_command(self, motor_id):
+        try:
+            angle = round(float(self.motor_sliders[motor_id].get()))
+            speed = round(float(self.speed_sliders[motor_id].get()))
+            success = self.send_motor_request(motor_id, angle, speed)
+            if success:
+                self.log(f"Motore {motor_id} impostato su angolo {angle} con velocità {speed}")
+                self.save_motor_position(motor_id, angle)  # Salva la posizione
+            else:
+                self.log(f"Errore durante l'impostazione del motore {motor_id}")
+        except Exception as e:
+            self.log(f"Errore durante l'invio del comando al motore {motor_id}: {e}")
+
+    def save_motor_position(self, motor_id, angle):
+        positions = self.load_motor_positions()
+        positions[str(motor_id)] = angle
+        with open(POSITIONS_FILE, 'w') as f:
+            json.dump(positions, f)
+
+    def set_pump_state(self, state):
+        req = PumpControl.Request()
+        req.turn_on = state
+    
+        if not self.pump_client.wait_for_service(timeout_sec=10.0):
+            self.log("Servizio '/pump_control' non disponibile.")
+            return False
+    
+        future = self.pump_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        result = future.result()
+    
+        if result and result.success:
+            self.log(f"Pompa {'ON' if state else 'OFF'}: {result.message}")
+            return True
+        else:
+            self.log(f"Errore pompa: {result.message if result else 'Nessuna risposta'}")
+            return False
+    
+    def set_valve_state(self, state):
+        req = ValveControl.Request()
+        req.turn_on = state
+    
+        if not self.valve_client.wait_for_service(timeout_sec=10.0):
+            self.log("Servizio '/valve_control' non disponibile.")
+            return False
+    
+        future = self.valve_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        result = future.result()
+    
+        if result and result.success:
+            self.log(f"Valvola {'ON' if state else 'OFF'}: {result.message}")
+            return True
+        else:
+            self.log(f"Errore valvola: {result.message if result else 'Nessuna risposta'}")
+            return False
 
 def main():
     rclpy.init()

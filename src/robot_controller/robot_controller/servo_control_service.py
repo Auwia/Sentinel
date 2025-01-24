@@ -1,7 +1,9 @@
 import rclpy
 from rclpy.node import Node
 from custom_interfaces.srv import SetServoAngle
+from custom_interfaces.srv import EmergencyStop
 import time
+import threading
 
 import sys
 print(f"Python utilizzato: {sys.executable}")
@@ -40,6 +42,7 @@ class ServoControlServiceNode(Node):
         super().__init__('servo_control_service')
 
         self.emergency_flag = False
+        self.emergency_event = threading.Event()
 
         # Memorizza le posizioni attuali dei servomotori
         self.servo_positions = {str(i): 0 for i in range(16)}
@@ -50,11 +53,9 @@ class ServoControlServiceNode(Node):
         self.pca.frequency = 50
 
         # Creazione del servizio
-        self.create_service(
-            SetServoAngle,  # Tipo del servizio
-            '/servo_control_service',  # Nome del servizio
-            self.handle_set_servo_angle_request  # Callback
-        )
+        self.create_service(SetServoAngle, '/servo_control_service', self.handle_set_servo_angle_request)
+        self.create_service(EmergencyStop, '/emergency_stop', self.handle_emergency_stop_request)  # Nuovo servizio
+
 
         self.get_logger().info("ServoControlServiceNode avviato e pronto a ricevere richieste.")
 
@@ -63,6 +64,12 @@ class ServoControlServiceNode(Node):
         target_angle = request.target_angle
         target_speed = request.target_speed
         servo_type = request.servo_type
+
+        if self.emergency_flag:
+            response.success = False
+            response.status_message = f"Emergenza attiva: comando al servo {motor_id} rifiutato."
+            self.get_logger().warn(f"Richiesta rifiutata per servo {motor_id} a causa dell'emergenza.")
+            return response
 
         try:
             self.set_servo_angle(motor_id, target_angle, target_speed, servo_type)
@@ -92,7 +99,7 @@ class ServoControlServiceNode(Node):
             self.get_logger().error(f"Velocità non valida ({speed}): deve essere maggiore di 0.")
             raise ValueError(f"Velocità {speed} non valida.")
 
-        if speed == 0 or self.emergency_flag:
+        if speed == 0 or self.emergency_flag or self.emergency_event.is_set():
             self.get_logger().info(f"Velocità impostata a 0. Spegnimento del servo sul canale {channel}.")
             self.pca.channels[channel].duty_cycle = 0  # Spegne il servo
             return
@@ -118,6 +125,11 @@ class ServoControlServiceNode(Node):
             self.get_logger().info(f"Iniziando movimento del servo {channel} da {current_angle}° a {target_angle}° a velocità {speed}°/s.")
             try:
                 for angle in range(int(current_angle), int(target_angle) + step, step):
+                    if self.emergency_flag:
+                        self.get_logger().warn(f"Movimento del servo {channel} interrotto per emergenza.")
+                        self.pca.channels[channel].duty_cycle = 0  # Spegne immediatamente il servo
+                        return
+
                     duty_cycle = int(min_duty + (angle / servo_type) * (max_duty - min_duty))
                     self.pca.channels[channel].duty_cycle = duty_cycle
                     self.servo_positions[str(channel)] = angle
@@ -139,6 +151,22 @@ class ServoControlServiceNode(Node):
         self.pca.deinit()
         self.get_logger().info("Controller PCA9685 pulito e risorse rilasciate.")
 
+    def handle_emergency_stop_request(self, request, response):
+        """Gestisce l'emergenza attivando o disattivando la modalità di emergenza."""
+        self.emergency_flag = request.activate
+        if self.emergency_flag:
+            self.emergency_event.set()
+            self.get_logger().warn("Emergenza attivata. Tutti i motori verranno fermati.")
+            # Ferma immediatamente tutti i motori
+            for channel in range(16):
+                self.pca.channels[channel].duty_cycle = 0
+        else:
+            self.emergency_event.clear()
+            self.get_logger().info("Emergenza disattivata.")
+        
+        response.success = True
+        response.message = "Emergenza aggiornata con successo."
+        return response
 
 def main(args=None):
     rclpy.init(args=args)

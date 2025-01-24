@@ -1,0 +1,5 @@
+bool activate  # True per attivare l'emergenza, False per disattivarla
+---
+bool success
+string message
+
