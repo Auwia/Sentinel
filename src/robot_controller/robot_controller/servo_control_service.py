@@ -2,6 +2,7 @@ import rclpy
 from rclpy.node import Node
 from custom_interfaces.srv import SetServoAngle
 from custom_interfaces.srv import EmergencyStop
+from custom_interfaces.srv import StopServo
 import time
 import threading
 
@@ -47,6 +48,9 @@ class ServoControlServiceNode(Node):
         # Memorizza le posizioni attuali dei servomotori
         self.servo_positions = {str(i): 0 for i in range(16)}
 
+        # Inizializza i flag di stop per ogni motore
+        self.servo_stop_flags = {i: False for i in range(16)}
+
         # PCA9685 initialization
         self.i2c = busio.I2C(SCL, SDA) if SCL and SDA else busio()
         self.pca = PCA9685(self.i2c, address=0x40)
@@ -55,9 +59,35 @@ class ServoControlServiceNode(Node):
         # Creazione del servizio
         self.create_service(SetServoAngle, '/servo_control_service', self.handle_set_servo_angle_request)
         self.create_service(EmergencyStop, '/emergency_stop', self.handle_emergency_stop_request)  # Nuovo servizio
-
+        self.create_service(StopServo, '/stop_servo', self.handle_stop_servo_request) 
 
         self.get_logger().info("ServoControlServiceNode avviato e pronto a ricevere richieste.")
+
+    def handle_stop_servo_request(self, request, response):
+            """Gestisce la richiesta di stop per un singolo motore."""
+            motor_id = request.motor_id
+            if motor_id < 0 or motor_id >= 16:
+                response.success = False
+                response.message = f"Motore {motor_id} non valido. ID deve essere tra 0 e 15."
+                self.get_logger().warn(response.message)
+                return response
+    
+            try:
+                self.servo_stop_flags[motor_id] = True
+                self.pca.channels[motor_id].duty_cycle = 0  # Ferma immediatamente il motore
+                self.get_logger().info(f"Motore {motor_id} fermato con successo.")
+
+                # Resetta il flag di stop
+                self.servo_stop_flags[motor_id] = False
+
+                response.success = True
+                response.message = f"Motore {motor_id} fermato."
+            except Exception as e:
+                response.success = False
+                response.message = f"Errore durante lo stop del motore {motor_id}: {e}"
+                self.get_logger().error(response.message)
+    
+            return response
 
     def handle_set_servo_angle_request(self, request, response):
         motor_id = request.motor_id
@@ -104,6 +134,12 @@ class ServoControlServiceNode(Node):
             self.pca.channels[channel].duty_cycle = 0  # Spegne il servo
             return
 
+        if self.servo_stop_flags[channel]:
+            self.get_logger().info(f"Interruzione richiesta per motore {channel}.")
+            self.pca.channels[channel].duty_cycle = 0
+            self.servo_stop_flags[channel] = False  # Resetta il flag di stop
+            return
+
         min_duty = 0x0666
         max_duty = 0x2CCC
 
@@ -125,9 +161,10 @@ class ServoControlServiceNode(Node):
             self.get_logger().info(f"Iniziando movimento del servo {channel} da {current_angle}° a {target_angle}° a velocità {speed}°/s.")
             try:
                 for angle in range(int(current_angle), int(target_angle) + step, step):
-                    if self.emergency_flag:
+                    if self.emergency_flag or self.servo_stop_flags[channel]:
                         self.get_logger().warn(f"Movimento del servo {channel} interrotto per emergenza.")
                         self.pca.channels[channel].duty_cycle = 0  # Spegne immediatamente il servo
+                        self.servo_stop_flags[channel] = False
                         return
 
                     duty_cycle = int(min_duty + (angle / servo_type) * (max_duty - min_duty))
@@ -159,10 +196,14 @@ class ServoControlServiceNode(Node):
             self.get_logger().warn("Emergenza attivata. Tutti i motori verranno fermati.")
             # Ferma immediatamente tutti i motori
             for channel in range(16):
-                self.pca.channels[channel].duty_cycle = 0
+                self.servo_stop_flags[channel] = True  # Imposta il flag di stop
+                self.pca.channels[channel].duty_cycle = 0  # Ferma immediatamente il motore
         else:
             self.emergency_event.clear()
             self.get_logger().info("Emergenza disattivata.")
+            # Resetta i flag di stop
+            for motor_id in self.servo_stop_flags:
+                self.servo_stop_flags[motor_id] = False
         
         response.success = True
         response.message = "Emergenza aggiornata con successo."

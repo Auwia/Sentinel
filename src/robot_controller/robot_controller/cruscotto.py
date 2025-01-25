@@ -1,7 +1,7 @@
 import time
 import rclpy
 from rclpy.node import Node
-from custom_interfaces.srv import SetServoAngle, PumpControl, ValveControl, EmergencyStop
+from custom_interfaces.srv import SetServoAngle, PumpControl, ValveControl, EmergencyStop, StopServo
 import tkinter as tk
 from tkinter import ttk
 from threading import Thread
@@ -24,6 +24,7 @@ class Cruscotto(Node):
         self.servo_service_client = self.create_client(SetServoAngle, '/servo_control_service')
         self.pump_client = self.create_client(PumpControl, '/pump_control')
         self.valve_client = self.create_client(ValveControl, '/valve_control')
+        self.stop_servo_client = self.create_client(StopServo, '/stop_servo')
 
         # Flag di emergenza
         self.emergency_flag = False
@@ -180,8 +181,27 @@ class Cruscotto(Node):
     def stop_motor(self, motor_id):
         """Interrompe il movimento del motore."""
         self.log(f"Interruzione del motore {motor_id}.")
-        self.motor_positions[motor_id] = self.motor_positions[motor_id]  # Mantieni la posizione attuale
-        self.update_current_label(motor_id, self.motor_positions[motor_id])
+
+        # Prepara la richiesta per fermare il motore
+        req = StopServo.Request()
+        req.motor_id = motor_id
+
+        # Verifica se il servizio è disponibile
+        if not self.stop_servo_client.wait_for_service(timeout_sec=5.0):
+            self.log(f"Servizio di stop per il motore {motor_id} non disponibile.")
+            return False
+    
+        # Invia la richiesta al server
+        future = self.stop_servo_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        result = future.result()
+    
+        if result and result.success:
+            self.log(f"Motore {motor_id} fermato con successo.")
+            self.motor_positions[motor_id] = self.motor_positions[motor_id]  # Mantieni la posizione attuale
+            self.update_current_label(motor_id, self.motor_positions[motor_id])
+        else:
+            self.log(f"Errore durante l'arresto del motore {motor_id}: {result.message if result else 'Nessuna risposta'}")
 
     def execute_prendi(self):
         """
@@ -422,7 +442,7 @@ class Cruscotto(Node):
         self.emergency_flag = True
         self.log("Emergenza attivata. Arresto di tutti i motori.")
 
-        # Invoca il servizio di emergenza nel nodo `servo_control_service`
+        # Invoca il servizio di emergenza nel nodo servo_control_service
         if not self.emergency_client.wait_for_service(timeout_sec=5.0):
             self.log("Servizio '/emergency_stop' non disponibile.")
         else:
@@ -454,6 +474,18 @@ class Cruscotto(Node):
 
         self.log("Emergenza completata.")
         self.emergency_flag = False  # Resetta la flag di emergenza
+
+        self.log("Ripristino lo stato normale sul server...")
+        request = EmergencyStop.Request()
+        request.activate = False
+        future = self.emergency_client.call_async(request)
+        rclpy.spin_until_future_complete(self, future)
+        if future.result().success:
+            self.log("Ripristino completato: il server è pronto per nuovi comandi.")
+            self.motor_positions = self.load_motor_positions()
+            self.log("Posizioni motori ripristinate dopo l'emergenza.")
+        else:
+            self.log("Errore durante il ripristino dello stato sul server.")
     
     def toggle_pump(self):
         # Determina lo stato attuale del pulsante (ON o OFF)
@@ -601,4 +633,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
