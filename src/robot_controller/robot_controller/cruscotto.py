@@ -364,6 +364,7 @@ class Cruscotto(Node):
             end_time_readable = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end_time))
             self.log(f"Motore {motor_id} raggiunto: {target_angle}\u00B0. END_TIME: {end_time_readable}")
             log_entry = f"Motore {motor_id} raggiunto: {target_angle}\u00B0. Velocità: {speed}\u00B0/s."
+            self.log(log_entry)
             self.root.after(0, self._update_motor_log, motor_id, log_entry)
     
             self.motor_positions[motor_id] = target_angle  # Aggiorna la posizione attuale
@@ -555,10 +556,15 @@ class Cruscotto(Node):
             speed = round(float(self.speed_sliders[motor_id].get()))
             success = self.send_motor_request(motor_id, angle, speed)
             if success:
-                self.log(f"Motore {motor_id} impostato su angolo {angle} con velocità {speed}")
+                message = f"Motore {motor_id} impostato su angolo {angle} con velocità {speed}"
+                self.log(message)
+                self.root.after(0, self._update_motor_log, motor_id, message)  # Log per il motore specifico
                 self.save_motor_position(motor_id, angle)  # Salva la posizione
             else:
-                self.log(f"Errore durante l'impostazione del motore {motor_id}")
+                message = f"Errore durante l'impostazione del motore {motor_id}"
+                self.log(message)
+                self.root.after(0, self._update_motor_log, motor_id, message)  # Log per il motore specifico
+
         except Exception as e:
             self.log(f"Errore durante l'invio del comando al motore {motor_id}: {e}")
 
