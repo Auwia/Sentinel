@@ -265,9 +265,8 @@ class Cruscotto(Node):
     
                 # Aggiorna i cursori con le posizioni caricate
                 for motor_id, angle in positions.items():
-                    if int(motor_id) in self.motor_sliders:
-                        self.motor_sliders[int(motor_id)].set(angle)
-                        self.update_motor_label(int(motor_id), angle)
+                    if int(motor_id) in self.current_labels:
+                        self.update_current_label(int(motor_id), angle)
                 return {int(k): v for k, v in positions.items()}
         else:
             default_positions = {i: 90 for i in range(3)}  
@@ -435,6 +434,7 @@ class Cruscotto(Node):
             result = future.result()
             if result.success:
                 self.log(f"Motore {motor_id} raggiunto: {target_angle}\u00B0 con velocità {target_speed}\u00B0/s.")
+                self.update_current_label(motor_id, target_angle)
         except Exception as e:
             self.log(f"Errore nella risposta del motore {motor_id}: {e}")
 
@@ -560,6 +560,7 @@ class Cruscotto(Node):
                 self.log(message)
                 self.root.after(0, self._update_motor_log, motor_id, message)  # Log per il motore specifico
                 self.save_motor_position(motor_id, angle)  # Salva la posizione
+                self.update_current_label(motor_id, angle)
             else:
                 message = f"Errore durante l'impostazione del motore {motor_id}"
                 self.log(message)
