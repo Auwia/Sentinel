@@ -10,6 +10,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetServoAngle.srv"
   "srv/EmergencyStop.srv"
   "srv/StopServo.srv"
+  "srv/GetServoPosition.srv"
   DEPENDENCIES builtin_interfaces
 )
 

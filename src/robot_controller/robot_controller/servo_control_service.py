@@ -1,8 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from custom_interfaces.srv import SetServoAngle
-from custom_interfaces.srv import EmergencyStop
-from custom_interfaces.srv import StopServo
+from custom_interfaces.srv import SetServoAngle, EmergencyStop, StopServo, GetServoPosition
 import time
 import threading
 
@@ -60,6 +58,7 @@ class ServoControlServiceNode(Node):
         self.create_service(SetServoAngle, '/servo_control_service', self.handle_set_servo_angle_request)
         self.create_service(EmergencyStop, '/emergency_stop', self.handle_emergency_stop_request)  # Nuovo servizio
         self.create_service(StopServo, '/stop_servo', self.handle_stop_servo_request) 
+        self.create_service(GetServoPosition, '/get_servo_position', self.handle_get_servo_position_request)
 
         self.get_logger().info("ServoControlServiceNode avviato e pronto a ricevere richieste.")
 
@@ -207,6 +206,21 @@ class ServoControlServiceNode(Node):
         
         response.success = True
         response.message = "Emergenza aggiornata con successo."
+        return response
+
+    def handle_get_servo_position_request(self, request, response):
+        motor_id = request.motor_id
+        try:
+            # Recupera la posizione attuale del motore dal dizionario
+            position = self.servo_positions.get(str(motor_id), 0)  
+            response.position = float(position)
+            response.success = True
+            self.get_logger().info(f"Richiesta posizione motore {motor_id}: {response.position}°")
+        except KeyError:
+            # Se il motore non esiste, restituisci un errore
+            response.success = False
+            response.message = f"Motore {motor_id} non trovato."
+            self.get_logger().error(response.message)
         return response
 
 def main(args=None):

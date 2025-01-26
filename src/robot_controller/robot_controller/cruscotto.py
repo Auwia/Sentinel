@@ -1,7 +1,7 @@
 import time
 import rclpy
 from rclpy.node import Node
-from custom_interfaces.srv import SetServoAngle, PumpControl, ValveControl, EmergencyStop, StopServo
+from custom_interfaces.srv import SetServoAngle, PumpControl, ValveControl, EmergencyStop, StopServo, GetServoPosition
 import tkinter as tk
 from tkinter import ttk
 from threading import Thread
@@ -19,12 +19,14 @@ class Cruscotto(Node):
         self.motor_positions = {}
         self.current_labels = {} 
         self.motor_logs = {i: [] for i in range(3)}
+        self.motor_polling_flags = {motor_id: False for motor_id in range(3)} 
 
         # ROS 2 Service Clients
         self.servo_service_client = self.create_client(SetServoAngle, '/servo_control_service')
         self.pump_client = self.create_client(PumpControl, '/pump_control')
         self.valve_client = self.create_client(ValveControl, '/valve_control')
         self.stop_servo_client = self.create_client(StopServo, '/stop_servo')
+        self.get_position_client = self.create_client(GetServoPosition, '/get_servo_position')
 
         # Flag di emergenza
         self.emergency_flag = False
@@ -111,6 +113,11 @@ class Cruscotto(Node):
             motor_log = tk.Text(motor_frame, height=5, width=30, state=tk.DISABLED, wrap=tk.WORD)
             motor_log.grid(row=5, column=0, columnspan=2, padx=5, pady=5)
             self.motor_logs[motor_id] = motor_log  # Popola il dizionario
+
+            # Etichetta per mostrare la posizione corrente del motore
+            current_label = ttk.Label(motor_frame, text="Corrente: 0°")
+            current_label.grid(row=6, column=0, columnspan=2, padx=5, pady=5)
+            self.current_labels[motor_id] = current_label  # Popola il dizionario delle label correnti
     
         # Aggiungere i callback solo dopo che i dizionari sono popolati
         for motor_id, slider in self.motor_sliders.items():
@@ -203,6 +210,9 @@ class Cruscotto(Node):
         else:
             self.log(f"Errore durante l'arresto del motore {motor_id}: {result.message if result else 'Nessuna risposta'}")
 
+        # Interrompi il polling per il motore
+        self.motor_polling_flags[motor_id] = False
+
     def execute_prendi(self):
         """
         Sequenza 'prendi' con step intermedi e finali.
@@ -255,23 +265,42 @@ class Cruscotto(Node):
 
     def load_motor_positions(self):
         """
-        Carica le posizioni dei motori dal file. Se il file non esiste,
-        restituisce una posizione di default.
+        Tenta di recuperare le posizioni reali dei motori dal servizio '/get_servo_position'.
+        Se il servizio non è disponibile, carica le posizioni dal file.
         """
-        if os.path.exists(POSITIONS_FILE):
-            with open(POSITIONS_FILE, 'r') as f:
-                positions = json.load(f)
-                self.log(f"Posizioni motori caricate: {positions}")
+        positions = {}
+        for motor_id in range(3):
+            req = GetServoPosition.Request()
+            req.motor_id = motor_id
     
-                # Aggiorna i cursori con le posizioni caricate
-                for motor_id, angle in positions.items():
-                    if int(motor_id) in self.current_labels:
-                        self.update_current_label(int(motor_id), angle)
-                return {int(k): v for k, v in positions.items()}
-        else:
-            default_positions = {i: 90 for i in range(3)}  
-            self.log(f"File posizioni non trovato, uso default: {default_positions}")
-            return default_positions
+            # Prova a recuperare la posizione dal servizio
+            if self.get_position_client.wait_for_service(timeout_sec=5.0):
+                self.log(f"Tentativo di recupero posizione reale per motore {motor_id}...")
+                future = self.get_position_client.call_async(req)
+                rclpy.spin_until_future_complete(self, future)
+                result = future.result()
+                if result and result.success:
+                    positions[motor_id] = result.position
+                    self.log(f"Motore {motor_id}: posizione reale recuperata: {result.position}°")
+                    continue
+    
+            # Se il servizio non è disponibile o fallisce, usa il file JSON
+            self.log(f"Impossibile recuperare la posizione reale per motore {motor_id}, uso il file.")
+            if os.path.exists(POSITIONS_FILE):
+                with open(POSITIONS_FILE, 'r') as f:
+                    file_positions = json.load(f)
+                    positions[motor_id] = file_positions.get(str(motor_id), 90)
+            else:
+                self.log(f"File posizioni non trovato, uso default per motore {motor_id}: 90°")
+                positions[motor_id] = 90
+    
+        # Aggiorna la GUI con le posizioni caricate
+        for motor_id, angle in positions.items():
+            if motor_id in self.current_labels:
+                self.update_current_label(motor_id, angle)
+    
+        self.log(f"Posizioni motori finali caricate: {positions}")
+        return positions
 
     def log(self, message):
         """Log su ROS 2 e aggiorna la GUI."""
@@ -349,8 +378,9 @@ class Cruscotto(Node):
             return
     
         current_position = self.motor_positions.get(motor_id, 0)
-        if current_position == target_angle:
+        if abs(current_position - target_angle) < 0.01:
             self.log(f"Motore {motor_id}: già all'angolo {current_position}\u00B0, nessun movimento necessario.")
+            self.root.after(0, self.update_current_label, motor_id, current_position)  # Sincronizza la label corrente
             return
     
         start_time = time.time()
@@ -368,8 +398,42 @@ class Cruscotto(Node):
     
             self.motor_positions[motor_id] = target_angle  # Aggiorna la posizione attuale
             self.update_current_label(motor_id, target_angle)
+            self.root.after(0, self.update_current_label, motor_id, target_angle)
         else:
             self.log(f"Errore nel movimento del motore {motor_id}.")
+
+    def poll_motor_position(self, motor_id):
+        """Esegue il polling della posizione corrente del motore."""
+        req = GetServoPosition.Request()
+        req.motor_id = motor_id
+    
+        self.motor_polling_flags[motor_id] = True  # Imposta il flag di polling per il motore
+    
+        while self.motor_polling_flags[motor_id]:  # Continua solo se il polling è attivo
+            if self.emergency_flag:  # Interrompi il polling in caso di emergenza
+                break
+    
+            # Controlla se il servizio è disponibile
+            if not self.get_position_client.wait_for_service(timeout_sec=5.0):
+                self.log(f"Servizio '/get_servo_position' non disponibile per il motore {motor_id}.")
+                break
+    
+            # Invia la richiesta al servizio
+            future = self.get_position_client.call_async(req)
+            rclpy.spin_until_future_complete(self, future)
+            result = future.result()
+    
+            if result and result.success:
+                # Aggiorna la posizione corrente sulla GUI
+                self.root.after(0, self.update_current_label, motor_id, result.position)
+                self.log(f"Motore {motor_id}: posizione reale aggiornata: {result.position}°")
+            else:
+                self.log(f"Errore nel recupero della posizione del motore {motor_id}: {result.message if result else 'Nessuna risposta'}")
+                break
+    
+            time.sleep(1)  # Riduci la frequenza del polling a 1 secondo
+    
+        self.log(f"Polling interrotto per il motore {motor_id}.")
 
     def _update_motor_log(self, motor_id, log_entry):
         """Aggiorna il log del motore specifico nel widget Text."""
@@ -392,6 +456,7 @@ class Cruscotto(Node):
         self.log_text.insert(tk.END, log_content)
 
     def update_current_label(self, motor_id, angle):
+        self.log(f"Aggiornamento etichetta motore {motor_id} con angolo {angle}")
         """Aggiorna la posizione corrente nella GUI."""
         if motor_id in self.current_labels:
             self.current_labels[motor_id].config(text=f"Corrente: {angle}\u00B0")
@@ -435,6 +500,7 @@ class Cruscotto(Node):
             if result.success:
                 self.log(f"Motore {motor_id} raggiunto: {target_angle}\u00B0 con velocità {target_speed}\u00B0/s.")
                 self.update_current_label(motor_id, target_angle)
+                self.root.after(0, self.update_current_label, motor_id, target_angle)
         except Exception as e:
             self.log(f"Errore nella risposta del motore {motor_id}: {e}")
 
@@ -561,6 +627,10 @@ class Cruscotto(Node):
                 self.root.after(0, self._update_motor_log, motor_id, message)  # Log per il motore specifico
                 self.save_motor_position(motor_id, angle)  # Salva la posizione
                 self.update_current_label(motor_id, angle)
+                self.root.after(0, self.update_current_label, motor_id, angle)
+                # Lancia il thread di polling per aggiornare la posizione corrente
+                if not self.motor_polling_flags[motor_id]:
+                    Thread(target=self.poll_motor_position, args=(motor_id,), daemon=True).start()
             else:
                 message = f"Errore durante l'impostazione del motore {motor_id}"
                 self.log(message)
@@ -570,10 +640,26 @@ class Cruscotto(Node):
             self.log(f"Errore durante l'invio del comando al motore {motor_id}: {e}")
 
     def save_motor_position(self, motor_id, angle):
-        positions = self.load_motor_positions()
-        positions[str(motor_id)] = angle
-        with open(POSITIONS_FILE, 'w') as f:
-            json.dump(positions, f)
+        """
+        Salva la posizione del motore nel file JSON.
+        """
+        try:
+            # Carica le posizioni esistenti
+            if os.path.exists(POSITIONS_FILE):
+                with open(POSITIONS_FILE, 'r') as f:
+                    positions = json.load(f)
+            else:
+                positions = {}
+    
+            # Aggiorna la posizione del motore
+            positions[str(motor_id)] = angle
+    
+            # Salva le posizioni aggiornate nel file
+            with open(POSITIONS_FILE, 'w') as f:
+                json.dump(positions, f)
+            self.log(f"Posizione del motore {motor_id} salvata: {angle}°")
+        except Exception as e:
+            self.log(f"Errore durante il salvataggio della posizione del motore {motor_id}: {e}")
 
     def set_pump_state(self, state):
         req = PumpControl.Request()
